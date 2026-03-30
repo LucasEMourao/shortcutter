@@ -1,0 +1,26 @@
+{
+  "version": "1.0.0",
+  "skills": [
+    {
+      "name": "skill-creator",
+      "description": "Create new skills, modify and improve existing skills, and measure skill performance.",
+      "path": ".agents/skills/skill-creator/SKILL.md",
+      "source": "anthropics/skills"
+    },
+    {
+      "name": "video-cutter",
+      "description": "Gera cortes automáticos de vídeos curtos (Reels, TikTok, Shorts) usando IA",
+      "path": ".agents/skills/video-cutter/SKILL.md",
+      "triggers": [
+        "cortar vídeo",
+        "gerar clips",
+        "analisar vídeo",
+        "momentos virais",
+        "Reels",
+        "TikTok",
+        "Shorts"
+      ],
+      "requirements": ["ffmpeg", "GEMINI_API_KEY"]
+    }
+  ]
+}
