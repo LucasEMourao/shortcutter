@@ -501,6 +501,9 @@ for cut in cuts:
     buffer_details.append(detail)
     print(f'  Cut {cut["id"]}: {original_end:.1f}s → {cut["end_sec"]:.1f}s ({detail["reason"]})')
 
+# Ordenar por timestamp antes de verificar sobreposições
+cuts.sort(key=lambda c: c['start_sec'])
+
 # Verificar sobreposições
 for i in range(len(cuts) - 1):
     if cuts[i]['end_sec'] > cuts[i+1]['start_sec']:
