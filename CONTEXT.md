@@ -146,10 +146,13 @@ find ~/projetos/shortcutter/.agents -type f | sort
 
 ## Limitação atual
 
-- **Gemini API free tier:** 20 requisições/dia por modelo
-- **Modelo usado:** gemini-3-flash-preview
+- **Modelo usado:** `gemini-3-flash-preview` — apenas 20 req/dia (free tier, modelo preview)
 - **Impacto:** ~2 chamadas por run (transcrição + análise), permite ~10 runs/dia
-- **Alternativa:** upgrade de plano ou usar modelo com quota maior
+- **Alternativas descobertas (via skill gemini-api-dev):**
+  - `gemini-2.5-flash` (estável): **250 req/dia** — 12x mais quota
+  - `gemini-2.5-flash-lite`: **1,000 req/dia** — 50x mais quota
+  - Ativar billing (Tier 1): 1,000 req/dia, sem limitação de modelo
+- **Próximo teste:** avaliar se `gemini-2.5-flash` mantém qualidade aceitável no nosso fluxo
 
 ## Decisões técnicas importantes
 
@@ -173,7 +176,8 @@ find ~/projetos/shortcutter/.agents -type f | sort
    - Princípio: melhor ter um pouco mais do que cortar demais
 
 5. **Modelo de IA:**
-   - Modelo principal: `gemini-3-flash-preview`
+   - Modelo atual: `gemini-3-flash-preview` (20 req/dia, melhor qualidade)
+   - Alternativa: `gemini-2.5-flash` (250 req/dia, estável, qualidade aceitável)
    - Respeita duração do vídeo
    - Não necessita normalização de timestamps
 

@@ -115,24 +115,22 @@ O script:
 ### 5.1 Objetivo
 Confirmar que a skill funciona para diferentes tipos de vídeo, não apenas o vídeo de teste de guitarra.
 
-### 5.2 Vídeos para testar
+### 5.2 Avaliação de modelo
+Antes de testar vídeos novos, avaliar se `gemini-2.5-flash` (250 req/dia) mantém qualidade aceitável comparado ao `gemini-3-flash-preview` (20 req/dia).
+
+### 5.3 Vídeos para testar
 - Vlog / conversa direta com câmera
 - Entrevista / podcast
 - Review de produto
 - Tutorial passo a passo
 - Conteúdo em inglês (teste de idioma)
 
-### 5.3 O que validar por vídeo
+### 5.4 O que validar por vídeo
 - Transcrição com timestamps precisos
 - Cortes alinham com o conteúdo
 - Buffer não corta palavras
 - Durações entre 15-60s
 - Clips MP4 válidos e reproduzíveis
-
-### 5.4 Bloqueio atual
-- Quota Gemini API esgotada (20 req/dia free tier)
-- Reset esperado: próximo dia
-- Alternativa: upgrade de plano ou aguardar
 
 ---
 
@@ -188,13 +186,15 @@ Confirmar que a skill funciona para diferentes tipos de vídeo, não apenas o v�
 5. **✅ Prompts refinados (transcrição + análise)**
 6. **✅ Script run.sh criado e funcionando**
 7. **✅ Buffer validado (2.0s correto, alinhamento OK)**
-8. **🔄 Próximo:** Testar com mais vídeos diferentes (aguardando quota Gemini resetar)
+8. **🔄 Próximo:** Testar com mais vídeos diferentes e avaliar modelo alternativo (`gemini-2.5-flash`, 250 req/dia)
 
 ## Limitação atual
 
-- **Gemini API free tier:** 20 requisições/dia por modelo (`gemini-3-flash-preview`)
-- **Impacto:** ~2 chamadas por run (transcrição + análise), permite ~10 runs/dia
-- **Alternativa:** upgrade de plano ou usar modelo com quota maior
+- **Modelo usado:** `gemini-3-flash-preview` — apenas 20 req/dia (free tier, modelo preview)
+- **Alternativas (via skill gemini-api-dev):**
+  - `gemini-2.5-flash` (estável): 250 req/dia
+  - `gemini-2.5-flash-lite`: 1,000 req/dia
+  - Billing Tier 1: 1,000 req/dia, sem restrição de modelo
 
 ---
 
