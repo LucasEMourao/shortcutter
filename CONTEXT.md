@@ -39,6 +39,13 @@
    - Nenhuma sobreposição, durações 15–60s ✓
    - Cobertura: 28.8% do vídeo (154s de 535s)
 
+8. **Transcrição por chunks para vídeos longos** (30/03/2026):
+   - Descoberto drift de timestamps em vídeos > 8min (ex: 11s de offset em vídeo de 13min)
+   - Implementado: chunks de 4min com offset, threshold de 8min
+   - Resultado: timestamps passaram a bater com o áudio real
+   - Testado com vídeo de 13.5min (809s) — 4 clips com timestamps corretos
+   - Ordenação por timestamp antes de verificação de sobreposição (fix bug)
+
 ## Estrutura atual do projeto
 
 ```
@@ -68,8 +75,9 @@
 │   └── WhatsApp Video 2026-03-25 at 14.35.40.mp4  ← Vídeo de teste
 ├── output/                          ← Clips gerados
 │   ├── ...                          ← 14 runs anteriores
-│   ├── 20260326_1344/               ← Último run com buffer antigo (1.5s)
-│   └── 20260326_1401/               ← Último run validado (buffer 2.0s correto)
+│   ├── 20260326_1344/               ← Buffer antigo (1.5s)
+│   ├── 20260326_1401/               ← Buffer 2.0s validado (vídeo 9min)
+│   └── 20260330_1913/               ← Chunks validado (vídeo 13min)
 └── skills-lock.json                 ← Gerado pelo npx skills
 ```
 
@@ -186,3 +194,10 @@ find ~/projetos/shortcutter/.agents -type f | sort
    - Indicadores de qualidade (hook_power, retention_potential, shareability)
    - Duração ideal por tipo (15-25s, 25-40s, 40-60s)
    - Funciona para qualquer tipo de vídeo (não específico para guitarra)
+
+7. **Transcrição por chunks (vídeos > 8min):**
+   - Gemini tem drift de timestamps em áudios longos (~1s/min de acúmulo)
+   - Threshold: 8min (480s). Abaixo: transcrição única. Acima: chunks de 4min
+   - Cada chunk transcreve com offset ajustado (timestamps absolutos)
+   - Deduplicação simples na mesclagem (remover segmentos sobrepostos)
+   - Retry com backoff para erros de demanda da API

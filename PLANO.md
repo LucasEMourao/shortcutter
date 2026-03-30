@@ -4,7 +4,7 @@
 Fazer a skill video-cutter funcionar com o mínimo de complexidade possível. Sem overengineering, sem frontend, sem banco de dados. Apenas: vídeo in → clips out.
 
 ## Status atual
-**MVP completo e validado.** Buffer 2.0s funcionando, 4 clips gerados com sucesso. Próximo passo: testar com vídeos de tipos diferentes (aguardando quota API).
+**MVP completo, validado e com fix de timestamps.** Chunked transcription implementada para vídeos > 8min. 4 clips gerados com timestamps corretos em vídeo de 13min. Próximo passo: mais vídeos de teste.
 
 ---
 
