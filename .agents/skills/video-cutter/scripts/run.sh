@@ -22,7 +22,7 @@ TEMP_DIR="/tmp/shortcutter_$$"
 PADDING_MAX=2.0
 MIN_DURATION=15
 MAX_DURATION=60
-GEMINI_MODEL="gemini-3-flash-preview"
+GEMINI_MODEL="gemini-2.5-flash"
 
 # === Funções auxiliares ===
 
@@ -120,285 +120,54 @@ extract_audio() {
   log "✓ Áudio extraído: $AUDIO_FILE"
 }
 
-# === Passo 3: Transcrever com Gemini ===
-
-# Transcrever um único arquivo de áudio (para vídeos curtos < 8min)
-transcribe_single() {
-  local audio_file="$1"
-  local duration="$2"
-  
-  # Upload do arquivo
-  local file_size=$(wc -c < "$audio_file")
-  local file_uri=$(curl -s "https://generativelanguage.googleapis.com/upload/v1beta/files?key=$GEMINI_API_KEY" \
-    -H "X-Goog-Upload-Command: start, upload, finalize" \
-    -H "X-Goog-Upload-Header-Content-Length: $file_size" \
-    -H "Content-Type: audio/wav" \
-    --data-binary "@$audio_file" | python3 -c "import sys,json; print(json.load(sys.stdin)['file']['uri'])")
-  
-  if [ -z "$file_uri" ]; then
-    error "Falha no upload do áudio para Gemini"
-  fi
-  
-  sleep 3
-  
-  python3 << PYEOF
-import json
-
-body = {
-    "contents": [{
-        "parts": [
-            {"file_data": {"mime_type": "audio/wav", "file_uri": "$file_uri"}},
-            {"text": """Transcreva este áudio com timestamps precisos.
-
-FORMATO JSON:
-{"transcription": [{"id": 1, "start_sec": 0.0, "end_sec": 5.2, "text": "..."}]}
-
-REGRAS:
-1. Todos os timestamps devem ser < """ + str(int(float("$duration"))) + """
-2. NÃO invente texto. Transcreva apenas o que ouve.
-3. NÃO crie entradas para pausas. Pule silêncios.
-4. Cada segmento = uma frase completa.
-5. Se não entender: "[UNCLEAR]"."""}
-        ]
-    }],
-    "generationConfig": {"response_mime_type": "application/json"}
-}
-
-with open('$TEMP_DIR/transcribe_request.json', 'w') as f:
-    json.dump(body, f)
-print('Request criado')
-PYEOF
-
-  curl -s "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=$GEMINI_API_KEY" \
-    -H 'Content-Type: application/json' \
-    -d "@$TEMP_DIR/transcribe_request.json" > "$TEMP_DIR/transcribe_response.json"
-
-  python3 << PYEOF
-import json, sys
-
-with open('$TEMP_DIR/transcribe_response.json') as f:
-    data = json.load(f)
-
-if 'error' in data:
-    print(f"Erro na API Gemini: {data['error'].get('message', 'Erro desconhecido')}", file=sys.stderr)
-    sys.exit(1)
-
-if 'candidates' not in data:
-    print(f"Resposta inesperada da API: {json.dumps(data)[:200]}", file=sys.stderr)
-    sys.exit(1)
-
-text = data['candidates'][0]['content']['parts'][0]['text']
-transcription = json.loads(text)
-
-with open('$TEMP_DIR/transcription.json', 'w') as f:
-    json.dump(transcription, f, indent=2, ensure_ascii=False)
-
-segs = transcription['transcription']
-print(f'Transcrição: {len(segs)} segmentos')
-PYEOF
-}
-
-# Transcrever em chunks (para vídeos longos >= 8min)
-transcribe_chunked() {
-  local audio_file="$1"
-  local duration="$2"
-  local chunk_duration=240  # 4 minutos por chunk
-  local offset=0
-  local chunk_num=0
-  local all_chunks="[]"
-  
-  mkdir -p "$TEMP_DIR/chunks"
-  
-  while (( $(echo "$offset < $duration" | bc -l) )); do
-    local chunk_file="$TEMP_DIR/chunks/chunk_${chunk_num}.wav"
-    
-    # Extrair chunk
-    ffmpeg -i "$audio_file" -ss "$offset" -t "$chunk_duration" "$chunk_file" -y 2>/dev/null
-    
-    # Upload
-    local file_size=$(wc -c < "$chunk_file")
-    local file_uri=$(curl -s "https://generativelanguage.googleapis.com/upload/v1beta/files?key=$GEMINI_API_KEY" \
-      -H "X-Goog-Upload-Command: start, upload, finalize" \
-      -H "X-Goog-Upload-Header-Content-Length: $file_size" \
-      -H "Content-Type: audio/wav" \
-      --data-binary "@$chunk_file" | python3 -c "import sys,json; print(json.load(sys.stdin)['file']['uri'])")
-    
-    if [ -z "$file_uri" ]; then
-      warn "Falha no upload do chunk $chunk_num, pulando..."
-      offset=$((offset + chunk_duration))
-      chunk_num=$((chunk_num + 1))
-      continue
-    fi
-    
-    sleep 2
-    
-    # Transcrever chunk com offset
-    python3 << PYEOF
-import json
-
-chunk_offset = int($offset)
-chunk_end = min(chunk_offset + $chunk_duration, int(float("$duration")))
-
-body = {
-    "contents": [{
-        "parts": [
-            {"file_data": {"mime_type": "audio/wav", "file_uri": "$file_uri"}},
-            {"text": f"""Transcreva este áudio com timestamps precisos.
-O áudio é um trecho do vídeo que começa em {chunk_offset}s e termina em {chunk_end}s.
-
-FORMATO JSON:
-{{"transcription": [{{"id": 1, "start_sec": {chunk_offset}.0, "end_sec": {chunk_offset + 5}.0, "text": "..."}}]}}
-
-REGRAS:
-1. TODOS os timestamps devem ser AJUSTADOS: some {chunk_offset} ao timestamp relativo do chunk
-2. Exemplo: se algo é dito 10s após o início do chunk, o timestamp é {chunk_offset + 10}.0
-3. Todos os timestamps devem ser >= {chunk_offset} e < {chunk_end}
-4. NÃO invente texto. Transcreva apenas o que ouve.
-5. NÃO crie entradas para pausas. Pule silêncios.
-6. Cada segmento = uma frase completa.
-7. Se não entender: "[UNCLEAR]"."""}
-        ]
-    }],
-    "generationConfig": {"response_mime_type": "application/json"}
-}
-
-with open('$TEMP_DIR/chunk_request_${chunk_num}.json', 'w') as f:
-    json.dump(body, f)
-print(f'Chunk {$chunk_num} request criado')
-PYEOF
-
-    # Tentar até 3 vezes com retry
-    local chunk_retry=0
-    local chunk_success=false
-    while [ $chunk_retry -lt 3 ] && [ "$chunk_success" = false ]; do
-      curl -s "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=$GEMINI_API_KEY" \
-        -H 'Content-Type: application/json' \
-        -d "@$TEMP_DIR/chunk_request_${chunk_num}.json" > "$TEMP_DIR/chunk_response_${chunk_num}.json"
-      
-      # Verificar se houve erro
-      local has_error=$(python3 -c "import json; d=json.load(open('$TEMP_DIR/chunk_response_${chunk_num}.json')); print('yes' if 'error' in d else 'no')" 2>/dev/null || echo "yes")
-      
-      if [ "$has_error" = "no" ]; then
-        chunk_success=true
-      else
-        chunk_retry=$((chunk_retry + 1))
-        if [ $chunk_retry -lt 3 ]; then
-          warn "Chunk ${chunk_num} retry ${chunk_retry}/3..."
-          sleep $((chunk_retry * 10))
-        fi
-      fi
-    done
-    
-    if [ "$chunk_success" = false ]; then
-      warn "Chunk ${chunk_num} falhou após 3 tentativas, pulando..."
-      offset=$((offset + chunk_duration))
-      chunk_num=$((chunk_num + 1))
-      continue
-    fi
-
-    # Extrair e salvar transcrição do chunk
-    python3 << PYEOF
-import json, sys
-
-with open('$TEMP_DIR/chunk_response_${chunk_num}.json') as f:
-    data = json.load(f)
-
-if 'error' in data:
-    print(f"  ⚠️ Chunk ${chunk_num} erro: {data['error'].get('message', '')[:80]}", file=sys.stderr)
-    sys.exit(1)
-
-if 'candidates' not in data:
-    print(f"  ⚠️ Chunk ${chunk_num} resposta inesperada", file=sys.stderr)
-    sys.exit(1)
-
-text = data['candidates'][0]['content']['parts'][0]['text']
-chunk_data = json.loads(text)
-
-# Chunk data pode ser lista direta ou objeto com 'transcription'
-if isinstance(chunk_data, list):
-    segs = chunk_data
-elif isinstance(chunk_data, dict):
-    segs = chunk_data.get('transcription', chunk_data.get('segments', []))
-else:
-    segs = []
-
-with open('$TEMP_DIR/chunk_${chunk_num}.json', 'w') as f:
-    json.dump({'transcription': segs}, f, indent=2, ensure_ascii=False)
-print(f'  Chunk ${chunk_num}: {len(segs)} segmentos')
-PYEOF
-
-    offset=$((offset + chunk_duration))
-    chunk_num=$((chunk_num + 1))
-    sleep 2
-  done
-  
-  # Mesclar todos os chunks
-  python3 << PYEOF
-import json, glob, os, re
-
-all_segments = []
-all_jsons = glob.glob('$TEMP_DIR/chunk_*.json')
-chunk_files = sorted(
-    [f for f in all_jsons if re.match(r'.*/chunk_\d+\.json$', f)],
-    key=lambda f: int(os.path.basename(f).split('_')[1].split('.')[0])
-)
-
-for cf in chunk_files:
-    try:
-        with open(cf) as f:
-            chunk = json.load(f)
-        segs = chunk.get('transcription', chunk.get('segments', []))
-        all_segments.extend(segs)
-    except Exception as e:
-        print(f'  ⚠️ Erro ao ler {cf}: {e}')
-
-# Re-ordenar por timestamp
-all_segments.sort(key=lambda s: s['start_sec'])
-
-# Deduplicação simples: remover segmentos que começam antes do fim do anterior
-cleaned = []
-for seg in all_segments:
-    if not cleaned or seg['start_sec'] >= cleaned[-1]['end_sec'] - 0.5:
-        cleaned.append(seg)
-    elif seg['end_sec'] > cleaned[-1]['end_sec']:
-        # Sobreposição: este termina depois, substituir
-        cleaned[-1] = seg
-
-for i, seg in enumerate(cleaned):
-    seg['id'] = i + 1
-
-for i, seg in enumerate(cleaned):
-    seg['id'] = i + 1
-
-transcription = {
-    'transcription': cleaned,
-    'total_duration_sec': float('${VIDEO_DURATION}'),
-    'language': 'pt-BR',
-    'audio_quality': 'medium',
-    'method': 'chunked',
-    'chunks_processed': len(chunk_files)
-}
-
-with open('$TEMP_DIR/transcription.json', 'w') as f:
-    json.dump(transcription, f, indent=2, ensure_ascii=False)
-
-print(f'  Transcrição mesclada: {len(cleaned)} segmentos de {len(chunk_files)} chunks')
-PYEOF
-}
+# === Passo 3: Transcrever com Whisper (local) ===
 
 transcribe_audio() {
-  log "Passo 3: Transcrevendo áudio com Gemini..."
+  log "Passo 3: Transcrevendo áudio com Whisper..."
   
-  local duration_int=$(echo "$VIDEO_DURATION" | cut -d. -f1)
-  local chunk_threshold=480  # 8 minutos
-  
-  if [ "$duration_int" -ge "$chunk_threshold" ]; then
-    log "  Vídeo longo (${VIDEO_DURATION}s) → usando chunks de 4min"
-    transcribe_chunked "$AUDIO_FILE" "$VIDEO_DURATION"
-  else
-    log "  Vídeo curto (${VIDEO_DURATION}s) → transcrição única"
-    transcribe_single "$AUDIO_FILE" "$VIDEO_DURATION"
+  # Verificar se faster-whisper está instalado
+  if ! python3 -c "from faster_whisper import WhisperModel" 2>/dev/null; then
+    error "faster-whisper não instalado. Instale com: pip3 install --user --break-system-packages faster-whisper"
   fi
+  
+  # Transcrever usando Whisper
+  python3 << PYEOF
+from faster_whisper import WhisperModel
+import json, sys
+
+video_path = "$VIDEO_PATH"
+output_path = '$TEMP_DIR/transcription.json'
+
+print("  Carregando modelo Whisper (small)...")
+model = WhisperModel("small", device="cpu", compute_type="int8")
+
+print(f"  Transcrevendo: {video_path}")
+segments, info = model.transcribe(video_path, language="pt", beam_size=5)
+
+transcription = []
+for i, seg in enumerate(segments):
+    transcription.append({
+        "id": i + 1,
+        "start_sec": round(seg.start, 2),
+        "end_sec": round(seg.end, 2),
+        "text": seg.text.strip()
+    })
+
+result = {
+    "transcription": transcription,
+    "total_duration_sec": round(info.duration, 2),
+    "language": info.language,
+    "language_probability": round(info.language_probability, 4),
+    "method": "whisper",
+    "model_size": "small"
+}
+
+with open(output_path, 'w') as f:
+    json.dump(result, f, indent=2, ensure_ascii=False)
+
+print(f"  Transcrição: {len(transcription)} segmentos")
+print(f"  Idioma: {info.language} ({info.language_probability:.2%})")
+PYEOF
   
   log "✓ Transcrição concluída"
 }
@@ -458,29 +227,33 @@ PYEOF
 analyze_cuts() {
   log "Passo 5: Analisando cortes virais..."
   
-  python3 << PYEOF
-import json
+  # Criar request de análise com Python (evita problemas de escaping em bash)
+  python3 -c "
+import json, os
 
-with open('$TEMP_DIR/transcription_sanitized.json') as f:
-    transcription = json.dumps(json.load(f))
+temp_dir = '$TEMP_DIR'
+video_duration = $VIDEO_DURATION
+mode = '$MODE'
 
-mode = "$MODE"
-extra_rules = ""
-if mode == "conservative":
-    extra_rules = """
+with open(f'{temp_dir}/transcription_sanitized.json') as f:
+    transcription = json.dumps(json.load(f), ensure_ascii=False)
+
+extra_rules = ''
+if mode == 'conservative':
+    extra_rules = '''
 MODO CONSERVADOR: 1-3 cortes com narrativa COMPLETA.
 Priorize COERÊNCIA e VALOR sobre viralidade.
-Duração mínima: 20s."""
+Duração mínima: 20s.'''
 
-prompt = f"""Analise a transcrição e identifique os melhores momentos para cortes virais.
+prompt = '''Analise a transcrição e identifique os melhores momentos para cortes virais.
 
 TRANSCRIÇÃO:
-{transcription}
+''' + transcription + '''
 
-DURAÇÃO TOTAL: ${VIDEO_DURATION} segundos
+DURAÇÃO TOTAL: ''' + str(video_duration) + ''' segundos
 
 FORMATO DE SAÍDA (JSON obrigatório):
-{{"analysis": {{"content_type": "tutorial|vlog|interview|review|story|other", "main_topics": ["topic1", "topic2"], "overall_viral_potential": 8.5}}, "cuts": [{{"id": 1, "start_sec": 12.5, "end_sec": 38.2, "content": "Transcrição do segmento...", "hook_type": "pattern_interrupt|curiosity_gap|result_first|controversial|fomo", "hook_power": 9, "retention_potential": 8, "shareability": 7, "viral_score": 8.1, "reason": "Por que este corte funciona..."}}], "quality_warnings": ["Aviso 1"]}}
+{\"analysis\": {\"content_type\": \"tutorial|vlog|interview|review|story|other\", \"main_topics\": [\"topic1\", \"topic2\"], \"overall_viral_potential\": 8.5}, \"cuts\": [{\"id\": 1, \"start_sec\": 12.5, \"end_sec\": 38.2, \"content\": \"Transcrição do segmento...\", \"hook_type\": \"pattern_interrupt|curiosity_gap|result_first|controversial|fomo\", \"hook_power\": 9, \"retention_potential\": 8, \"shareability\": 7, \"viral_score\": 8.1, \"reason\": \"Por que este corte funciona...\"}], \"quality_warnings\": [\"Aviso 1\"]}
 
 CRITÉRIOS:
 - HOOK (0-3s): pattern_interrupt, curiosity_gap, result_first, controversial, fomo
@@ -491,51 +264,38 @@ CRITÉRIOS:
 REGRAS DE CORTE:
 - O corte DEVE começar no INÍCIO de uma frase ou segmento de fala
 - O corte DEVE terminar no FIM de uma frase completa ou pensamento completo
-- NUNCA corte no meio de uma frase. O último segmento do corte deve terminar com pontuação natural (ponto, exclamação, interrogação) ou pausa clara
-- Se o melhor momento termina no meio de uma frase, ESTENDA o corte até o final da frase
+- NUNCA corte no meio de uma frase
 
 REGRAS CRÍTICAS:
 1. Timestamps DEVEM existir na transcrição
 2. NÃO invente timestamps
-3. end_sec DEVE ser <= ${VIDEO_DURATION}
+3. end_sec DEVE ser <= ''' + str(video_duration) + '''
 4. start_sec DEVE ser < end_sec
 5. Se não houver bons cortes: array vazio com explicação
 
-PADRÕES DE HOOK (adapte ao conteúdo do vídeo):
-- curiosity_gap: Pergunta que cria lacuna mental → "O que acontece quando...", "Você sabia que..."
-- result_first: Mostra resultado primeiro → "Olha o resultado...", "Veja o que acontece quando..."
-- pattern_interrupt: Começa no meio da ação, sem introdução → [execução direta, sem "olá pessoal"]
-- pain_point: Identifica problema comum → "Se você tem esse problema...", "Se isso acontece com você..."
-- fomo: Cria urgência → "Você precisa saber isso antes de...", "Não faça isso sem saber..."
-
-INDICADORES DE QUALIDADE (independente de conteúdo):
-- hook_power 8+: Para de scrollar nos primeiros 3s
-- retention_potential 8+: Mantém atenção do início ao fim
-- shareability 7+: Vale enviar pra um amigo
-- viral_score 7.5+: Combinado dos três acima
-
-DURAÇÃO IDEAL POR TIPO:
-- 15-25s: Dica rápida, conceito único
-- 25-40s: Tutorial, explicação
-- 40-60s: História, review detalhado
+PADRÕES DE HOOK:
+- curiosity_gap: Pergunta que cria lacuna mental
+- result_first: Mostra resultado primeiro
+- pattern_interrupt: Começa no meio da ação
+- pain_point: Identifica problema comum
+- fomo: Cria urgência
 
 O QUE NÃO FAZER:
 - Cortar no meio de uma frase
 - Silêncio > 1.5s dentro do corte
 - Hook fraco nos primeiros 3s
-- Duração > 60s (perde atenção)
-- Sem CTA ou frase de efeito
-{extra_rules}"""
+- Duração > 60s
+''' + extra_rules
 
 body = {
-    "contents": [{"parts": [{"text": prompt}]}],
-    "generationConfig": {"response_mime_type": "application/json"}
+    'contents': [{'parts': [{'text': prompt}]}],
+    'generationConfig': {'response_mime_type': 'application/json'}
 }
 
-with open('$TEMP_DIR/analyze_request.json', 'w') as f:
-    json.dump(body, f)
+with open(f'{temp_dir}/analyze_request.json', 'w') as f:
+    json.dump(body, f, ensure_ascii=False)
 print('Request de análise criado')
-PYEOF
+"
   
   # Enviar request
   curl -s "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=$GEMINI_API_KEY" \
