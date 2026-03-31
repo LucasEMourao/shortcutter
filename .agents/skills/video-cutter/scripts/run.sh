@@ -222,107 +222,36 @@ PYEOF
   log "✓ Sanitização concluída"
 }
 
-# === Passo 5: Identificar cortes virais ===
+# === Passo 5: Identificar cortes virais (com chunking) ===
 
 analyze_cuts() {
-  log "Passo 5: Analisando cortes virais..."
+  log "Passo 5: Analisando cortes virais (chunked)..."
   
-  # Criar request de análise com Python (evita problemas de escaping em bash)
-  python3 -c "
-import json, os
-
-temp_dir = '$TEMP_DIR'
-video_duration = $VIDEO_DURATION
-mode = '$MODE'
-
-with open(f'{temp_dir}/transcription_sanitized.json') as f:
-    transcription = json.dumps(json.load(f), ensure_ascii=False)
-
-extra_rules = ''
-if mode == 'conservative':
-    extra_rules = '''
-MODO CONSERVADOR: 1-3 cortes com narrativa COMPLETA.
-Priorize COERÊNCIA e VALOR sobre viralidade.
-Duração mínima: 20s.'''
-
-prompt = '''Analise a transcrição e identifique os melhores momentos para cortes virais.
-
-TRANSCRIÇÃO:
-''' + transcription + '''
-
-DURAÇÃO TOTAL: ''' + str(video_duration) + ''' segundos
-
-FORMATO DE SAÍDA (JSON obrigatório):
-{\"analysis\": {\"content_type\": \"tutorial|vlog|interview|review|story|other\", \"main_topics\": [\"topic1\", \"topic2\"], \"overall_viral_potential\": 8.5}, \"cuts\": [{\"id\": 1, \"start_sec\": 12.5, \"end_sec\": 38.2, \"content\": \"Transcrição do segmento...\", \"hook_type\": \"pattern_interrupt|curiosity_gap|result_first|controversial|fomo\", \"hook_power\": 9, \"retention_potential\": 8, \"shareability\": 7, \"viral_score\": 8.1, \"reason\": \"Por que este corte funciona...\"}], \"quality_warnings\": [\"Aviso 1\"]}
-
-CRITÉRIOS:
-- HOOK (0-3s): pattern_interrupt, curiosity_gap, result_first, controversial, fomo
-- SCORE: viral_score = (hook × 0.4) + (retention × 0.3) + (shareability × 0.3)
-- DURAÇÃO: 15-60 segundos por corte
-- MÍNIMO: 3 cortes, MÁXIMO: 8 cortes
-
-REGRAS DE CORTE:
-- O corte DEVE começar no INÍCIO de uma frase ou segmento de fala
-- O corte DEVE terminar no FIM de uma frase completa ou pensamento completo
-- NUNCA corte no meio de uma frase
-
-REGRAS CRÍTICAS:
-1. Timestamps DEVEM existir na transcrição
-2. NÃO invente timestamps
-3. end_sec DEVE ser <= ''' + str(video_duration) + '''
-4. start_sec DEVE ser < end_sec
-5. Se não houver bons cortes: array vazio com explicação
-
-PADRÕES DE HOOK:
-- curiosity_gap: Pergunta que cria lacuna mental
-- result_first: Mostra resultado primeiro
-- pattern_interrupt: Começa no meio da ação
-- pain_point: Identifica problema comum
-- fomo: Cria urgência
-
-O QUE NÃO FAZER:
-- Cortar no meio de uma frase
-- Silêncio > 1.5s dentro do corte
-- Hook fraco nos primeiros 3s
-- Duração > 60s
-''' + extra_rules
-
-body = {
-    'contents': [{'parts': [{'text': prompt}]}],
-    'generationConfig': {'response_mime_type': 'application/json'}
-}
-
-with open(f'{temp_dir}/analyze_request.json', 'w') as f:
-    json.dump(body, f, ensure_ascii=False)
-print('Request de análise criado')
-"
+  # Verificar se o script de chunked analysis existe
+  local chunked_script="$SKILL_DIR/scripts/analyze_chunked.py"
+  if [ ! -f "$chunked_script" ]; then
+    error "Script de chunked analysis não encontrado: $chunked_script"
+  fi
   
-  # Enviar request
-  curl -s "https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=$GEMINI_API_KEY" \
-    -H 'Content-Type: application/json' \
-    -d "@$TEMP_DIR/analyze_request.json" > "$TEMP_DIR/analyze_response.json"
+  # Executar chunked analysis
+  python3 "$chunked_script" \
+    "$TEMP_DIR/transcription_sanitized.json" \
+    "$VIDEO_DURATION" \
+    "$MODE" \
+    "$TEMP_DIR/analysis.json" \
+    "$GEMINI_API_KEY" \
+    "$GEMINI_MODEL"
   
-  # Extrair cortes
+  if [ $? -ne 0 ]; then
+    error "Falha na análise chunked"
+  fi
+  
+  # Extrair cortes válidos para o formato esperado pelos próximos passos
   python3 << PYEOF
 import json, sys
 
-with open('$TEMP_DIR/analyze_response.json') as f:
-    data = json.load(f)
-
-# Verificar se houve erro na API
-if 'error' in data:
-    print(f"Erro na API Gemini: {data['error'].get('message', 'Erro desconhecido')}", file=sys.stderr)
-    sys.exit(1)
-
-if 'candidates' not in data:
-    print(f"Resposta inesperada da API: {json.dumps(data)[:200]}", file=sys.stderr)
-    sys.exit(1)
-
-text = data['candidates'][0]['content']['parts'][0]['text']
-analysis = json.loads(text)
-
-with open('$TEMP_DIR/analysis.json', 'w') as f:
-    json.dump(analysis, f, indent=2, ensure_ascii=False)
+with open('$TEMP_DIR/analysis.json') as f:
+    analysis = json.load(f)
 
 video_duration = float('$VIDEO_DURATION')
 valid = []
@@ -543,6 +472,7 @@ output = {
         'main_topics': analysis['analysis']['main_topics'],
         'overall_viral_potential': analysis['analysis']['overall_viral_potential']
     },
+    'chunking_info': analysis.get('chunking_info', {}),
     'buffer_details': data['buffer_details'],
     'cuts': data['cuts'],
     'total_cuts': len(data['cuts']),
