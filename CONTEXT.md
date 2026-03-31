@@ -46,6 +46,14 @@
    - Testado com vídeo de 13.5min (809s) — 4 clips com timestamps corretos
    - Ordenação por timestamp antes de verificação de sobreposição (fix bug)
 
+8. **Whisper para transcrição** (30/03/2026):
+   - Gemini alucinava conteúdo da transcrição (Cut 1 com 0% de match)
+   - Substituído por faster-whisper (modelo small, local, sem API)
+   - Gemini agora usado apenas para análise de cortes virais (~1 chamada/run)
+   - Modelo de análise: gemini-2.5-flash (250 req/dia)
+   - Resultado: Cut 1 passou de 0% para 69% de similaridade de conteúdo
+   - Sem mais necessidade de chunks ou sanitização de timestamps
+
 ## Estrutura atual do projeto
 
 ```
