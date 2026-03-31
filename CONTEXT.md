@@ -39,20 +39,16 @@
    - Nenhuma sobreposição, durações 15–60s ✓
    - Cobertura: 28.8% do vídeo (154s de 535s)
 
-8. **Transcrição por chunks para vídeos longos** (30/03/2026):
-   - Descoberto drift de timestamps em vídeos > 8min (ex: 11s de offset em vídeo de 13min)
-   - Implementado: chunks de 4min com offset, threshold de 8min
-   - Resultado: timestamps passaram a bater com o áudio real
-   - Testado com vídeo de 13.5min (809s) — 4 clips com timestamps corretos
-   - Ordenação por timestamp antes de verificação de sobreposição (fix bug)
-
-8. **Whisper para transcrição** (30/03/2026):
-   - Gemini alucinava conteúdo da transcrição (Cut 1 com 0% de match)
-   - Substituído por faster-whisper (modelo small, local, sem API)
-   - Gemini agora usado apenas para análise de cortes virais (~1 chamada/run)
-   - Modelo de análise: gemini-2.5-flash (250 req/dia)
+8. **Descobrimos e resolvemos o problema de alucinação do Gemini** (30/03/2026):
+   - Gemini alucinava conteúdo da transcrição (Cut 1 com 0% de match com áudio real)
+   - Testamos chunked transcription (chunks de 4min) — melhorou mas não resolveu
+   - Descobrimos que Gemini não é modelo de transcrição — gera texto pelo significado, não palavra por palavra
+   - Instalamos faster-whisper (modelo small, local, sem API) para transcrição
    - Resultado: Cut 1 passou de 0% para 69% de similaridade de conteúdo
-   - Sem mais necessidade de chunks ou sanitização de timestamps
+   - Trocamos modelo de análise para gemini-2.5-flash (250 req/dia)
+   - Criamos validate_cuts.py para validação estrutural e de conteúdo
+   - Instalamos skill gemini-api-dev como referência de API
+   - Fix: ordenação por timestamp antes de verificação de sobreposição
 
 ## Estrutura atual do projeto
 
@@ -69,43 +65,49 @@
 │       │   ├── SKILL.md             ← YAML frontmatter + fluxo conciso
 │       │   ├── scripts/
 │       │   │   ├── helper.sh        ← FFmpeg utils
-│       │   │   └── run.sh           ← Automação completa
+│       │   │   ├── run.sh           ← Automação completa
+│       │   │   └── validate_cuts.py ← Validação de output
 │       │   ├── references/
 │       │   │   ├── prompts.md       ← Prompts Gemini detalhados
 │       │   │   └── ffmpeg.md        ← Comandos FFmpeg
 │       │   └── examples/
 │       │       └── examples.md      ← Exemplos de uso
+│       ├── gemini-api-dev/          ← Skill de referência Google
+│       │   └── SKILL.md             ← Modelos, SDKs, limites API
 │       └── skills_index.json
 ├── .env                             ← API key configurada
+├── AGENTS.md                        ← Instruções para commits
 ├── CONTEXT.md                       ← Este arquivo
 ├── PLANO.md                         ← Plano de desenvolvimento
 ├── test/
-│   └── WhatsApp Video 2026-03-25 at 14.35.40.mp4  ← Vídeo de teste
+│   ├── WhatsApp Video 2026-03-25 at 14.35.40.mp4
+│   └── videoTeste13min.mp4          ← Vídeo de teste longo
 ├── output/                          ← Clips gerados
-│   ├── ...                          ← 14 runs anteriores
-│   ├── 20260326_1344/               ← Buffer antigo (1.5s)
+│   ├── ...                          ← Runs anteriores
 │   ├── 20260326_1401/               ← Buffer 2.0s validado (vídeo 9min)
-│   └── 20260330_1913/               ← Chunks validado (vídeo 13min)
+│   └── 20260331_0024/               ← Whisper validado (vídeo 13min)
 └── skills-lock.json                 ← Gerado pelo npx skills
 ```
 
 ## O que está pronto ✅
 
 - ✅ Skill-creator instalada como referência
+- ✅ Skill gemini-api-dev instalada (referência de modelos e quotas)
 - ✅ SKILL.md com YAML frontmatter (`disable-model-invocation: true`)
 - ✅ Fluxo de 9 passos documentado
 - ✅ scripts/helper.sh com comandos FFmpeg
 - ✅ scripts/run.sh com automação completa
+- ✅ scripts/validate_cuts.py com validação estrutural e de conteúdo
 - ✅ references/prompts.md com prompts Gemini otimizados
 - ✅ references/ffmpeg.md com comandos de referência
 - ✅ examples/examples.md com referências genéricas de qualidade
 - ✅ skills_index.json atualizado
 - ✅ GEMINI_API_KEY configurada via `.env`
-- ✅ Modelo definido: `gemini-3-flash-preview`
+- ✅ faster-whisper instalado para transcrição local
+- ✅ Modelo de análise: `gemini-2.5-flash` (250 req/dia)
 - ✅ Buffer inteligente implementado (MAX_GAP=2.0s, BUFFER=2.0s)
-- ✅ Sanitização de timestamps (Passo 4)
 - ✅ Referências genéricas de qualidade no prompt (hook patterns, quality indicators)
-- ✅ Testes realizados com sucesso
+- ✅ Testes realizados com sucesso (vídeo 9min e 13min)
 
 ## Como usar a skill
 
@@ -143,43 +145,40 @@ find ~/projetos/shortcutter/.agents -type f | sort
 3. Cole este documento como contexto inicial
 4. Diga: "Continuar desenvolvimento da AgentSkill video-cutter"
 
-## Resultados da última execução (20260326_1401)
+## Resultados da última execução (20260331_0024 — Whisper)
 
-| Corte | Timestamp | Duração | Score | Hook | Buffer |
-|-------|-----------|---------|-------|------|--------|
-| 1 | 19.3s–62.0s | 42.7s | 8.4 | curiosity_gap | 2.0s fixo (gap 2.1s) |
-| 2 | 62.1s–90.5s | 28.4s | 8.3 | pain_point | 2.0s fixo (gap 58.1s) |
-| 3 | 448.3s–484.2s | 35.9s | 8.7 | result_first | 1.7s estendido (gap 1.7s) |
-| 4 | 487.7s–535.1s | 47.5s | 7.4 | pattern_interrupt | 2.3s até fim do vídeo |
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 9.1s–54.6s | 45.5s | 8.7 | curiosity_gap |
+| 2 | 100.8s–134.6s | 33.8s | 9.7 | result_first |
+| 3 | 294.6s–355.6s | 61.0s | 8.3 | curiosity_gap |
+| 4 | 367.2s–423.0s | 55.8s | 9.0 | pattern_interrupt |
+| 5 | 485.8s–513.8s | 28.0s | 8.7 | curiosity_gap |
 
 **Validação:**
-- ✅ Buffer 2.0s funcionando corretamente
+- ✅ Transcrição: 319 segmentos via Whisper (sem alucinação)
+- ✅ Cut 1: 69% de similaridade de conteúdo (era 0% com Gemini)
+- ✅ Todos os clips válidos (tamanhos 1.9M–5.0M)
 - ✅ Nenhuma sobreposição entre cortes
-- ✅ Todas durações entre 15–60s
-- ✅ Clips MP4 válidos (tamanhos 3.4M–7.7M)
-- ⚠️ Gap de 358s não coberto (90s→448s) — conteúdo do vídeo, não é bug
-- ⚠️ Cobertura 28.8% — pode aumentar com mais segmentos na transcrição
+- ⚠️ Cut 3: 61.0s (1s acima do limite de 60s)
 
 ## Limitação atual
 
-- **Modelo usado:** `gemini-3-flash-preview` — apenas 20 req/dia (free tier, modelo preview)
-- **Impacto:** ~2 chamadas por run (transcrição + análise), permite ~10 runs/dia
-- **Alternativas descobertas (via skill gemini-api-dev):**
-  - `gemini-2.5-flash` (estável): **250 req/dia** — 12x mais quota
-  - `gemini-2.5-flash-lite`: **1,000 req/dia** — 50x mais quota
-  - Ativar billing (Tier 1): 1,000 req/dia, sem limitação de modelo
-- **Próximo teste:** avaliar se `gemini-2.5-flash` mantém qualidade aceitável no nosso fluxo
+- **Transcrição:** Whisper local (sem custo, sem limite de quota)
+- **Análise:** `gemini-2.5-flash` — 1 chamada por run, 250 req/dia
+- **Impacto:** permite ~250 runs/dia (vs ~10 antes com gemini-3-flash-preview)
+- **Dependência:** faster-whisper precisa de `pip install --user --break-system-packages faster-whisper`
 
 ## Decisões técnicas importantes
 
 1. **Duas passagens separadas:**
-   - Passagem 1: Transcrição áudio → timestamps precisos
-   - Passagem 2: Análise cortes → segmentos virais
+   - Passagem 1: Whisper transcreve áudio localmente (sem API)
+   - Passagem 2: Gemini analisa e identifica cortes virais (1 chamada API)
 
 2. **Anti-alucinação:**
-   - Timestamps baseados apenas na transcrição
-   - Validação determinística em código
-   - Não estimar ou inventar timestamps
+   - Whisper é modelo dedicado para transcrição — não alucina
+   - Timestamps precisos por segmento (precisão de centésimos)
+   - Gemini usado apenas para análise, nunca para transcrição
 
 3. **Modos de operação:**
    - Agressivo: 3-8 cortes, foco viralidade
@@ -189,23 +188,16 @@ find ~/projetos/shortcutter/.agents -type f | sort
    - MAX_GAP = 2.0s (estende até próximo segmento se gap ≤ 2s)
    - BUFFER = 2.0s (buffer fixo se gap > 2s)
    - Evita cortar palavras no meio
-   - Princípio: melhor ter um pouco mais do que cortar demais
 
-5. **Modelo de IA:**
-   - Modelo atual: `gemini-3-flash-preview` (20 req/dia, melhor qualidade)
-   - Alternativa: `gemini-2.5-flash` (250 req/dia, estável, qualidade aceitável)
-   - Respeita duração do vídeo
-   - Não necessita normalização de timestamps
+5. **Modelos de IA:**
+   - Transcrição: faster-whisper small (local, CPU, int8)
+   - Análise: `gemini-2.5-flash` (250 req/dia, estável)
 
 6. **Referências genéricas de qualidade:**
    - Padrões de hook (curiosity_gap, result_first, pattern_interrupt, pain_point, fomo)
    - Indicadores de qualidade (hook_power, retention_potential, shareability)
    - Duração ideal por tipo (15-25s, 25-40s, 40-60s)
-   - Funciona para qualquer tipo de vídeo (não específico para guitarra)
 
-7. **Transcrição por chunks (vídeos > 8min):**
-   - Gemini tem drift de timestamps em áudios longos (~1s/min de acúmulo)
-   - Threshold: 8min (480s). Abaixo: transcrição única. Acima: chunks de 4min
-   - Cada chunk transcreve com offset ajustado (timestamps absolutos)
-   - Deduplicação simples na mesclagem (remover segmentos sobrepostos)
-   - Retry com backoff para erros de demanda da API
+7. **Validação de output:**
+   - validate_cuts.py: validação estrutural sem API
+   - Opção --verify-content: usa Gemini para verificar se áudio real bate com JSON

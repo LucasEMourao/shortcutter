@@ -4,7 +4,7 @@
 Fazer a skill video-cutter funcionar com o mínimo de complexidade possível. Sem overengineering, sem frontend, sem banco de dados. Apenas: vídeo in → clips out.
 
 ## Status atual
-**MVP completo, validado e com fix de timestamps.** Chunked transcription implementada para vídeos > 8min. 4 clips gerados com timestamps corretos em vídeo de 13min. Próximo passo: mais vídeos de teste.
+**MVP completo, validado e sem alucinação.** Whisper substituiu Gemini para transcrição. Gemini usado apenas para análise (1 chamada/run). 5 clips gerados com 69% de match de conteúdo (era 0%). Próximo passo: testar com mais vídeos.
 
 ---
 
@@ -53,8 +53,8 @@ Estrutura final:
 ### 2.3 Executar fluxo manualmente ✅
 Passos validados:
 1. Extrair áudio ✅
-2. Transcrever com Gemini (gemini-3-flash-preview) ✅
-3. Analisar transcrição ✅
+2. Transcrever com Whisper (local, sem API) ✅
+3. Analisar com Gemini (gemini-2.5-flash) ✅
 4. Sanitizar timestamps ✅
 5. Validar timestamps ✅
 6. Aplicar buffer inteligente ✅
@@ -75,6 +75,9 @@ Passos validados:
 | Regra de `[PAUSE Xs]` causava inflação | Removida. Pula silêncios em vez de criar entradas |
 | Cortes terminavam no meio de frases | Buffer inteligente (MAX_GAP=2.0s, BUFFER=2.0s) |
 | Exemplos específicos demais (guitarra) | Referências genéricas de qualidade (hook patterns) |
+| Gemini alucinava conteúdo da transcrição | Substituído por faster-whisper (transcrição local) |
+| gemini-3-flash-preview tinha só 20 req/dia | Trocado para gemini-2.5-flash (250 req/dia) |
+| Cortes fora de ordem causavam sobreposição | Sort por timestamp antes de verificação |
 
 ### 3.2 Referências genéricas adicionadas
 - Padrões de hook: curiosity_gap, result_first, pattern_interrupt, pain_point, fomo
@@ -113,21 +116,18 @@ O script:
 ## Fase 5: Validação com múltiplos vídeos 🔄 PRÓXIMA
 
 ### 5.1 Objetivo
-Confirmar que a skill funciona para diferentes tipos de vídeo, não apenas o vídeo de teste de guitarra.
+Confirmar que a skill funciona para diferentes tipos de vídeo com o novo fluxo (Whisper + gemini-2.5-flash).
 
-### 5.2 Avaliação de modelo
-Antes de testar vídeos novos, avaliar se `gemini-2.5-flash` (250 req/dia) mantém qualidade aceitável comparado ao `gemini-3-flash-preview` (20 req/dia).
-
-### 5.3 Vídeos para testar
+### 5.2 Vídeos para testar
 - Vlog / conversa direta com câmera
 - Entrevista / podcast
 - Review de produto
 - Tutorial passo a passo
 - Conteúdo em inglês (teste de idioma)
 
-### 5.4 O que validar por vídeo
-- Transcrição com timestamps precisos
-- Cortes alinham com o conteúdo
+### 5.3 O que validar por vídeo
+- Transcrição Whisper sem alucinação
+- Cortes alinham com o conteúdo (usar validate_cuts.py --verify-content)
 - Buffer não corta palavras
 - Durações entre 15-60s
 - Clips MP4 válidos e reproduzíveis
@@ -167,13 +167,14 @@ Antes de testar vídeos novos, avaliar se `gemini-2.5-flash` (250 req/dia) mant�
 
 ### MVP funcionando ✅ (TODAS ATINGIDAS):
 1. ✅ Consegue extrair áudio de um vídeo
-2. ✅ Consegue transcrever com Gemini (gemini-3-flash-preview)
-3. ✅ Consegue identificar 3-5 cortes
+2. ✅ Consegue transcrever com Whisper (local, sem alucinação)
+3. ✅ Consegue identificar 3-5 cortes virais (via Gemini)
 4. ✅ Consegue gerar clips MP4
 5. ✅ Clips têm qualidade aceitável (áudio limpo, sem cortes errados)
-6. ✅ Timestamps são precisos (sem necessidade de normalização)
-7. ✅ Palavras não são cortadas (buffer inteligente)
+6. ✅ Timestamps são precisos (Whisper + buffer inteligente)
+7. ✅ Conteúdo transcrito corresponde ao áudio real (69%+ match)
 8. ✅ Script automatizado funciona (run.sh)
+9. ✅ Validação automática de output (validate_cuts.py)
 
 ---
 
@@ -186,13 +187,15 @@ Antes de testar vídeos novos, avaliar se `gemini-2.5-flash` (250 req/dia) mant�
 5. **✅ Prompts refinados (transcrição + análise)**
 6. **✅ Script run.sh criado e funcionando**
 7. **✅ Buffer validado (2.0s correto, alinhamento OK)**
-8. **🔄 Próximo:** Testar com mais vídeos diferentes e avaliar modelo alternativo (`gemini-2.5-flash`, 250 req/dia)
+8. **✅ Whisper substituiu Gemini para transcrição (sem alucinação)**
+9. **🔄 Próximo:** Testar com mais vídeos diferentes
 
 ## Limitação atual
 
-- **Modelo usado:** `gemini-3-flash-preview` — apenas 20 req/dia (free tier, modelo preview)
-- **Alternativas (via skill gemini-api-dev):**
-  - `gemini-2.5-flash` (estável): 250 req/dia
+- **Transcrição:** Whisper local (sem custo, sem limite)
+- **Análise:** `gemini-2.5-flash` — 1 chamada/run, 250 req/dia
+- **Dependência:** faster-whisper (`pip install --user --break-system-packages faster-whisper`)
+- **Alternativas de modelo (via skill gemini-api-dev):**
   - `gemini-2.5-flash-lite`: 1,000 req/dia
   - Billing Tier 1: 1,000 req/dia, sem restrição de modelo
 
