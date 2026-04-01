@@ -1,3 +1,4 @@
 .env*
 output/
 test/
+__pycache__/
