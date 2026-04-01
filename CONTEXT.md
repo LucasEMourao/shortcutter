@@ -69,6 +69,13 @@
     - Todos os vídeos processados com sucesso mesmo após exceder quota do modelo primário
     - Cobertura final validada: 79-98% em todos os vídeos testados
 
+11. **Descoberta dinâmica de modelos via API** (01/04/2026):
+    - Substituímos fallback hardcoded por descoberta via endpoint /v1beta/models
+    - API retorna modelos disponíveis em tempo real (9 modelos flash encontrados)
+    - Ordenação: não-lite primeiro (mais capazes), depois versão descendente
+    - Se Google lançar novo modelo, será usado automaticamente sem alterar código
+    - Resultado: cobertura equivalente, com mais opções de fallback
+
 ## Estrutura atual do projeto
 
 ```
@@ -220,9 +227,9 @@ find ~/projetos/shortcutter/.agents -type f | sort
 
 - **Transcrição:** Whisper local (sem custo, sem limite de quota)
 - **Análise:** `gemini-2.5-flash` — ~6 chamadas por run (chunked), 20 req/dia free tier
-- **Fallback:** Se quota do modelo primário esgotar, usa automaticamente `gemini-3-flash-preview` ou `gemini-3.1-flash-lite-preview`
+- **Fallback:** Modelos descobertos dinamicamente via API. Percorre todos os Flash disponíveis até encontrar um com quota
 - **Retry:** Erros 503 (overload) têm retry automático com backoff (até 3 tentativas)
-- **Impacto:** ~3 runs/dia por modelo no free tier (20 req ÷ ~6 chamadas/run), mas com fallback permite mais
+- **Impacto:** ~3 runs/dia por modelo no free tier (20 req ÷ ~6 chamadas/run), mas com fallback entre 9 modelos permite muito mais
 - **Dependência:** faster-whisper precisa de `pip install --user --break-system-packages faster-whisper`
 
 ## Decisões técnicas importantes
@@ -255,9 +262,11 @@ find ~/projetos/shortcutter/.agents -type f | sort
 
 5. **Modelos de IA:**
    - Transcrição: faster-whisper small (local, CPU, int8)
-   - Análise: `gemini-2.5-flash` (20 req/dia free tier, ~6 chamadas/run)
-   - Fallback: `gemini-3-flash-preview` → `gemini-3.1-flash-lite-preview`
+   - Análise: modelos Flash descobertos dinamicamente via API (/v1beta/models)
+   - Ordenação: não-lite primeiro (mais capazes), depois versão descendente
+   - Fallback automático: percorre todos os modelos até encontrar um com quota
    - Retry: erros 503 têm backoff automático (10s/20s/30s)
+   - Modelos atuais (exemplo): gemini-3-flash → gemini-2.5-flash → gemini-2.0-flash → ... → gemini-3.1-flash-lite → gemini-2.5-flash-lite
 
 6. **Referências genéricas de qualidade:**
    - Padrões de hook (curiosity_gap, result_first, pattern_interrupt, pain_point, fomo)
