@@ -233,14 +233,13 @@ analyze_cuts() {
     error "Script de chunked analysis não encontrado: $chunked_script"
   fi
   
-  # Executar chunked analysis
+  # Executar chunked analysis (modelo é descoberto dinamicamente via API)
   python3 "$chunked_script" \
     "$TEMP_DIR/transcription_sanitized.json" \
     "$VIDEO_DURATION" \
     "$MODE" \
     "$TEMP_DIR/analysis.json" \
-    "$GEMINI_API_KEY" \
-    "$GEMINI_MODEL"
+    "$GEMINI_API_KEY"
   
   if [ $? -ne 0 ]; then
     error "Falha na análise chunked"

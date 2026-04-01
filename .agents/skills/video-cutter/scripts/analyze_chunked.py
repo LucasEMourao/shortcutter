@@ -316,25 +316,23 @@ def main():
     mode = sys.argv[3]
     output_path = sys.argv[4]
     api_key = sys.argv[5]
-    primary_model = sys.argv[6] if len(sys.argv) > 6 else "gemini-2.5-flash"
+    user_model = sys.argv[6] if len(sys.argv) > 6 else None
     
     # Descobrir modelos disponíveis via API (mais recentes primeiro)
     available_models = discover_models(api_key)
     
     if available_models:
-        # Se modelo primário foi especificado, colocar primeiro
-        if primary_model in available_models:
-            available_models.remove(primary_model)
-            available_models.insert(0, primary_model)
-        elif primary_model not in available_models:
-            available_models.insert(0, primary_model)
         models = available_models
+        # Se usuário especificou um modelo, colocar primeiro
+        if user_model:
+            if user_model in models:
+                models.remove(user_model)
+            models.insert(0, user_model)
     else:
-        # Fallback estático se API de modelos falhar
-        FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
-        if primary_model not in FALLBACK_MODELS:
-            FALLBACK_MODELS.insert(0, primary_model)
-        models = FALLBACK_MODELS
+        # Fallback estático se API de modelos falhar (mais recente primeiro)
+        models = ["gemini-3-flash-preview", "gemini-2.5-flash", "gemini-3.1-flash-lite-preview"]
+        if user_model and user_model not in models:
+            models.insert(0, user_model)
     
     current_model_idx = 0
     
