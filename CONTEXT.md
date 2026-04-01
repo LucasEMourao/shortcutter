@@ -138,7 +138,7 @@
 - ✅ skills_index.json atualizado
 - ✅ GEMINI_API_KEY configurada via `.env`
 - ✅ faster-whisper instalado para transcrição local
-- ✅ Modelo de análise: `gemini-2.5-flash` (20 req/dia free tier, fallback para outros modelos)
+- ✅ Modelo de análise: modelos Flash descobertos dinamicamente via API (mais recente primeiro)
 - ✅ Buffer inteligente implementado (MAX_GAP=2.0s, BUFFER=2.0s)
 - ✅ Quality floor implementado (viral_score mínimo 7.5)
 - ✅ Chunked analysis implementado (cobertura 2x maior)
