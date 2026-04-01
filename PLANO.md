@@ -4,7 +4,7 @@
 Fazer a skill video-cutter funcionar com o mínimo de complexidade possível. Sem overengineering, sem frontend, sem banco de dados. Apenas: vídeo in → clips out.
 
 ## Status atual
-**MVP completo, validado e sem alucinação.** Whisper substituiu Gemini para transcrição. Gemini usado apenas para análise (1 chamada/run). 5 clips gerados com 69% de match de conteúdo (era 0%). Próximo passo: testar com mais vídeos.
+**MVP completo, validado e robusto.** Whisper transcreve localmente (sem API). Gemini analisa com chunked analysis (~6 chamadas/run). Fallback automático entre modelos quando quota esgota. Retry com backoff para erros 503. Todos os 6 vídeos de teste processados com sucesso (cobertura 79-98%). Próximo passo: melhorias ou produção.
 
 ---
 
@@ -113,10 +113,20 @@ O script:
 
 ---
 
-## Fase 5: Validação com múltiplos vídeos 🔄 PRÓXIMA
+## Fase 5: Validação com múltiplos vídeos ✅ CONCLUÍDA
 
 ### 5.1 Objetivo
 Confirmar que a skill funciona para diferentes tipos de vídeo com o novo fluxo (Whisper + gemini-2.5-flash).
+
+### 5.2 Vídeos testados (chunked analysis, 01/04/2026)
+| Vídeo | Duração | Clips | Cobertura | Fallback usado? |
+|-------|---------|-------|-----------|-----------------|
+| Podcast | 15min | 17 | 0s-940s (98%) | Não |
+| Standup | 12min | 13 | 13s-716s (97%) | Não (chunk 6: 429 mas completou) |
+| Curto | 4min | 5 | 11s-218s (83%) | Sim (chunk 1: fallback para flash-preview) |
+| WhatsApp | 9min | 5 | 105s-528s (79%) | Sim (chunks 1-2: fallback) |
+| Data centers | 13min | 14 | 0s-793s (100%) | Não |
+| Tutorial | 17min | 16 | 0s-1058s (100%) | Não |
 
 ### 5.2 Vídeos para testar
 - Vlog / conversa direta com câmera
@@ -188,15 +198,16 @@ Confirmar que a skill funciona para diferentes tipos de vídeo com o novo fluxo 
 6. **✅ Script run.sh criado e funcionando**
 7. **✅ Buffer validado (2.0s correto, alinhamento OK)**
 8. **✅ Whisper substituiu Gemini para transcrição (sem alucinação)**
-9. **🔄 Próximo:** Testar com mais vídeos diferentes
+9. **✅ Todos os 6 vídeos testados com chunked analysis (cobertura 79-98%)**
+10. **✅ Fallback de modelos implementado (2.5-flash → 3-flash → 3.1-flash-lite)**
 
 ## Limitação atual
 
 - **Transcrição:** Whisper local (sem custo, sem limite)
-- **Análise:** `gemini-2.5-flash` — 1 chamada/run, 250 req/dia
+- **Análise:** `gemini-2.5-flash` — ~6 chamadas/run, 20 req/dia free tier
+- **Fallback:** `gemini-3-flash-preview` e `gemini-3.1-flash-lite-preview`
+- **Retry:** backoff automático para erros 503 (overload)
 - **Dependência:** faster-whisper (`pip install --user --break-system-packages faster-whisper`)
-- **Alternativas de modelo (via skill gemini-api-dev):**
-  - `gemini-2.5-flash-lite`: 1,000 req/dia
   - Billing Tier 1: 1,000 req/dia, sem restrição de modelo
 
 ---

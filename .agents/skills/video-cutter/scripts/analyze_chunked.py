@@ -11,6 +11,7 @@ Uso: python3 analyze_chunked.py <transcription.json> <video_duration> <mode> <ou
 import json
 import sys
 import os
+import time
 import urllib.request
 import urllib.error
 
@@ -135,41 +136,82 @@ O QUE NÃO FAZER:
     return prompt
 
 
-def call_gemini(prompt, api_key, model="gemini-2.5-flash"):
-    """Chama a API Gemini e retorna a resposta parseada."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+def call_gemini(prompt, api_key, models, current_model_idx=0):
+    """Chama a API Gemini com fallback entre modelos.
     
-    body = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"response_mime_type": "application/json"}
-    }
+    Quando um modelo atinge quota (429), tenta o próximo modelo da lista.
+    Retorna (resultado, índice_do_modelo_usado).
+    """
+    if isinstance(models, str):
+        models = [models]
     
-    data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+    last_error = None
+    MAX_RETRIES_503 = 3
     
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
+    for idx in range(current_model_idx, len(models)):
+        model = models[idx]
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+        
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"response_mime_type": "application/json"}
+        }
+        
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        
+        for attempt in range(MAX_RETRIES_503):
+            req = urllib.request.Request(
+                url,
+                data=data,
+                headers={"Content-Type": "application/json"},
+                method="POST"
+            )
+            
+            try:
+                with urllib.request.urlopen(req, timeout=120) as response:
+                    result = json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                error_body = e.read().decode("utf-8") if e.fp else "Unknown"
+                if e.code == 429:
+                    print(f"    ⚠️ 429 em {model}, tentando próximo modelo...")
+                    last_error = f"429 em {model}: quota esgotada"
+                    break  # Sai do loop de retry, vai para próximo modelo
+                if e.code == 503:
+                    wait = 10 * (attempt + 1)
+                    print(f"    ⚠️ 503 em {model}, retry em {wait}s (tentativa {attempt+1}/{MAX_RETRIES_503})...")
+                    time.sleep(wait)
+                    continue  # Retry no mesmo modelo
+                raise Exception(f"Erro na API Gemini ({e.code}) com {model}: {error_body}")
+            except Exception as e:
+                raise Exception(f"Erro ao chamar API Gemini com {model}: {e}")
+            
+            # Verificar erro no body da resposta
+            if "error" in result:
+                err_msg = result["error"].get("message", "Unknown")
+                err_code = result["error"].get("code", 0)
+                if err_code == 429 or "quota" in err_msg.lower() or "RESOURCE_EXHAUSTED" in str(result["error"]):
+                    print(f"    ⚠️ 429 em {model}, tentando próximo modelo...")
+                    last_error = f"429 em {model}: {err_msg}"
+                    break  # Sai do loop de retry
+                if err_code == 503 or "UNAVAILABLE" in str(result["error"]):
+                    wait = 10 * (attempt + 1)
+                    print(f"    ⚠️ 503 em {model}, retry em {wait}s (tentativa {attempt+1}/{MAX_RETRIES_503})...")
+                    time.sleep(wait)
+                    continue  # Retry
+                raise Exception(f"Erro na API Gemini com {model}: {err_msg}")
+            
+            if "candidates" not in result:
+                raise Exception(f"Resposta inesperada da API com {model}: {json.dumps(result)[:200]}")
+            
+            text = result["candidates"][0]["content"]["parts"][0]["text"]
+            parsed = json.loads(text)
+            
+            if idx > current_model_idx:
+                print(f"    ✓ Fallback para {model} funcionou")
+            
+            return parsed, idx
     
-    try:
-        with urllib.request.urlopen(req, timeout=120) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8") if e.fp else "Unknown"
-        raise Exception(f"Erro na API Gemini ({e.code}): {error_body}")
-    except Exception as e:
-        raise Exception(f"Erro ao chamar API Gemini: {e}")
-    
-    if "error" in result:
-        raise Exception(f"Erro na API Gemini: {result['error'].get('message', 'Unknown')}")
-    
-    if "candidates" not in result:
-        raise Exception(f"Resposta inesperada da API: {json.dumps(result)[:200]}")
-    
-    text = result["candidates"][0]["content"]["parts"][0]["text"]
-    return json.loads(text)
+    raise Exception(f"Todos os modelos esgotaram. Último erro: {last_error}")
 
 
 def merge_cuts(all_cuts, video_duration):
@@ -224,7 +266,18 @@ def main():
     mode = sys.argv[3]
     output_path = sys.argv[4]
     api_key = sys.argv[5]
-    model = sys.argv[6] if len(sys.argv) > 6 else "gemini-2.5-flash"
+    primary_model = sys.argv[6] if len(sys.argv) > 6 else "gemini-2.5-flash"
+    
+    # Fallback chain: tenta próximo modelo se quota esgotar
+    FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
+    if primary_model not in FALLBACK_MODELS:
+        FALLBACK_MODELS.insert(0, primary_model)
+    elif FALLBACK_MODELS[0] != primary_model:
+        FALLBACK_MODELS.remove(primary_model)
+        FALLBACK_MODELS.insert(0, primary_model)
+    
+    models = FALLBACK_MODELS
+    current_model_idx = 0
     
     # Carregar transcrição
     with open(transcription_path) as f:
@@ -254,7 +307,7 @@ def main():
         prompt = build_prompt(chunk, video_duration, mode)
         
         try:
-            result = call_gemini(prompt, api_key, model)
+            result, current_model_idx = call_gemini(prompt, api_key, models, current_model_idx)
             
             # Coletar cortes
             if "cuts" in result:

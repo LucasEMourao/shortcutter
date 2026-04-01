@@ -45,7 +45,7 @@
    - Descobrimos que Gemini não é modelo de transcrição — gera texto pelo significado, não palavra por palavra
    - Instalamos faster-whisper (modelo small, local, sem API) para transcrição
    - Resultado: Cut 1 passou de 0% para 69% de similaridade de conteúdo
-   - Trocamos modelo de análise para gemini-2.5-flash (250 req/dia)
+   - Trocamos modelo de análise para gemini-2.5-flash (20 req/dia free tier)
    - Criamos validate_cuts.py para validação estrutural e de conteúdo
    - Instalamos skill gemini-api-dev como referência de API
    - Fix: ordenação por timestamp antes de verificação de sobreposição
@@ -60,6 +60,14 @@
    - Início e final do vídeo agora são capturados corretamente
    - Criação do script `analyze_chunked.py`
    - Modificação do `run.sh` para usar chunked analysis
+
+10. **Implementamos fallback entre modelos e retry com backoff** (01/04/2026):
+    - Descobrimos que quota real do gemini-2.5-flash free tier é 20 req/dia (não 250)
+    - Rodamos todos os 6 vídeos com chunked analysis
+    - Implementamos fallback automático: gemini-2.5-flash → gemini-3-flash-preview → gemini-3.1-flash-lite-preview
+    - Implementamos retry com backoff (até 3 tentativas, 10s/20s/30s) para erros 503 (overload)
+    - Todos os vídeos processados com sucesso mesmo após exceder quota do modelo primário
+    - Cobertura final validada: 79-98% em todos os vídeos testados
 
 ## Estrutura atual do projeto
 
@@ -123,7 +131,7 @@
 - ✅ skills_index.json atualizado
 - ✅ GEMINI_API_KEY configurada via `.env`
 - ✅ faster-whisper instalado para transcrição local
-- ✅ Modelo de análise: `gemini-2.5-flash` (250 req/dia)
+- ✅ Modelo de análise: `gemini-2.5-flash` (20 req/dia free tier, fallback para outros modelos)
 - ✅ Buffer inteligente implementado (MAX_GAP=2.0s, BUFFER=2.0s)
 - ✅ Quality floor implementado (viral_score mínimo 7.5)
 - ✅ Chunked analysis implementado (cobertura 2x maior)
@@ -165,8 +173,8 @@ find ~/projetos/shortcutter/.agents -type f | sort
 2. Inicie nova conversa com o agente
 3. Cole este documento como contexto inicial
 4. Diga: "Continuar desenvolvimento da AgentSkill video-cutter"
-5. Status atual: Chunked analysis implementado e testado com 2 vídeos
-6. Próximo passo: testar com mais vídeos ou implementar melhorias adicionais
+5. Status atual: Todos os 6 vídeos testados com chunked analysis + fallback de modelos
+6. Próximo passo: melhorias (legendas, templates, batch processing) ou produção
 
 ## Resultados da última execução (20260331_1439 — Chunked Analysis)
 
@@ -211,8 +219,10 @@ find ~/projetos/shortcutter/.agents -type f | sort
 ## Limitação atual
 
 - **Transcrição:** Whisper local (sem custo, sem limite de quota)
-- **Análise:** `gemini-2.5-flash` — ~6 chamadas por run (chunked), 250 req/dia
-- **Impacto:** permite ~40 runs/dia (vs ~250 antes com 1 chamada/run)
+- **Análise:** `gemini-2.5-flash` — ~6 chamadas por run (chunked), 20 req/dia free tier
+- **Fallback:** Se quota do modelo primário esgotar, usa automaticamente `gemini-3-flash-preview` ou `gemini-3.1-flash-lite-preview`
+- **Retry:** Erros 503 (overload) têm retry automático com backoff (até 3 tentativas)
+- **Impacto:** ~3 runs/dia por modelo no free tier (20 req ÷ ~6 chamadas/run), mas com fallback permite mais
 - **Dependência:** faster-whisper precisa de `pip install --user --break-system-packages faster-whisper`
 
 ## Decisões técnicas importantes
@@ -245,7 +255,9 @@ find ~/projetos/shortcutter/.agents -type f | sort
 
 5. **Modelos de IA:**
    - Transcrição: faster-whisper small (local, CPU, int8)
-   - Análise: `gemini-2.5-flash` (250 req/dia, estável, ~6 chamadas/run)
+   - Análise: `gemini-2.5-flash` (20 req/dia free tier, ~6 chamadas/run)
+   - Fallback: `gemini-3-flash-preview` → `gemini-3.1-flash-lite-preview`
+   - Retry: erros 503 têm backoff automático (10s/20s/30s)
 
 6. **Referências genéricas de qualidade:**
    - Padrões de hook (curiosity_gap, result_first, pattern_interrupt, pain_point, fomo)
