@@ -256,6 +256,56 @@ def merge_cuts(all_cuts, video_duration):
     return merged
 
 
+def discover_models(api_key):
+    """Descobre modelos Flash disponíveis via API, do mais recente ao mais antigo."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    
+    req = urllib.request.Request(url, method="GET")
+    
+    try:
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except Exception as e:
+        print(f"  ⚠️ Não foi possível listar modelos: {e}")
+        return []
+    
+    if "models" not in data:
+        return []
+    
+    # Filtrar: apenas modelos Flash de texto (excluir imagem, TTS, latest aliases)
+    skip_keywords = ["image", "tts", "latest"]
+    flash_models = []
+    for m in data["models"]:
+        name = m.get("name", "").replace("models/", "")
+        supported = m.get("supportedGenerationMethods", [])
+        
+        if "generateContent" not in supported or "flash" not in name.lower():
+            continue
+        if any(kw in name for kw in skip_keywords):
+            continue
+        flash_models.append(name)
+    
+    # Ordenar: capazes primeiro (não-lite > lite), depois versão descendente
+    def sort_key(model_name):
+        parts = model_name.replace("gemini-", "").split("-")
+        version_str = parts[0] if parts else "0"
+        try:
+            version = tuple(int(x) for x in version_str.split("."))
+        except ValueError:
+            version = (0, 0)
+        is_preview = 1 if "preview" in model_name else 0
+        is_lite = 1 if "lite" in model_name else 0
+        # Não-lite primeiro, depois versão descendente, depois stable > preview
+        return (is_lite, -version[0], -version[1] if len(version) > 1 else 0, is_preview)
+    
+    flash_models.sort(key=sort_key)
+    
+    if flash_models:
+        print(f"  Modelos Flash disponíveis: {' → '.join(flash_models)}")
+    
+    return flash_models
+
+
 def main():
     if len(sys.argv) < 6:
         print("Uso: python3 analyze_chunked.py <transcription.json> <video_duration> <mode> <output.json> <api_key> [model]")
@@ -268,15 +318,24 @@ def main():
     api_key = sys.argv[5]
     primary_model = sys.argv[6] if len(sys.argv) > 6 else "gemini-2.5-flash"
     
-    # Fallback chain: tenta próximo modelo se quota esgotar
-    FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
-    if primary_model not in FALLBACK_MODELS:
-        FALLBACK_MODELS.insert(0, primary_model)
-    elif FALLBACK_MODELS[0] != primary_model:
-        FALLBACK_MODELS.remove(primary_model)
-        FALLBACK_MODELS.insert(0, primary_model)
+    # Descobrir modelos disponíveis via API (mais recentes primeiro)
+    available_models = discover_models(api_key)
     
-    models = FALLBACK_MODELS
+    if available_models:
+        # Se modelo primário foi especificado, colocar primeiro
+        if primary_model in available_models:
+            available_models.remove(primary_model)
+            available_models.insert(0, primary_model)
+        elif primary_model not in available_models:
+            available_models.insert(0, primary_model)
+        models = available_models
+    else:
+        # Fallback estático se API de modelos falhar
+        FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-3-flash-preview", "gemini-3.1-flash-lite-preview"]
+        if primary_model not in FALLBACK_MODELS:
+            FALLBACK_MODELS.insert(0, primary_model)
+        models = FALLBACK_MODELS
+    
     current_model_idx = 0
     
     # Carregar transcrição
