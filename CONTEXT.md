@@ -226,7 +226,7 @@ find ~/projetos/shortcutter/.agents -type f | sort
 ## Limitação atual
 
 - **Transcrição:** Whisper local (sem custo, sem limite de quota)
-- **Análise:** `gemini-2.5-flash` — ~6 chamadas por run (chunked), 20 req/dia free tier
+- **Análise:** Modelos Flash descobertos dinamicamente via API (~6 chamadas por run), 20 req/dia por modelo no free tier
 - **Fallback:** Modelos descobertos dinamicamente via API. Percorre todos os Flash disponíveis até encontrar um com quota
 - **Retry:** Erros 503 (overload) têm retry automático com backoff (até 3 tentativas)
 - **Impacto:** ~3 runs/dia por modelo no free tier (20 req ÷ ~6 chamadas/run), mas com fallback entre 9 modelos permite muito mais

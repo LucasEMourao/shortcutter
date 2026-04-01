@@ -76,7 +76,7 @@ Passos validados:
 | Cortes terminavam no meio de frases | Buffer inteligente (MAX_GAP=2.0s, BUFFER=2.0s) |
 | Exemplos específicos demais (guitarra) | Referências genéricas de qualidade (hook patterns) |
 | Gemini alucinava conteúdo da transcrição | Substituído por faster-whisper (transcrição local) |
-| gemini-3-flash-preview tinha só 20 req/dia | Trocado para gemini-2.5-flash (250 req/dia) |
+| gemini-3-flash-preview tinha quota limitada | Descoberta dinâmica de modelos via API (9 modelos, fallback automático) |
 | Cortes fora de ordem causavam sobreposição | Sort por timestamp antes de verificação |
 
 ### 3.2 Referências genéricas adicionadas
@@ -116,7 +116,7 @@ O script:
 ## Fase 5: Validação com múltiplos vídeos ✅ CONCLUÍDA
 
 ### 5.1 Objetivo
-Confirmar que a skill funciona para diferentes tipos de vídeo com o novo fluxo (Whisper + gemini-2.5-flash).
+Confirmar que a skill funciona para diferentes tipos de vídeo com o fluxo completo (Whisper + descoberta dinâmica de modelos Flash via API).
 
 ### 5.2 Vídeos testados (chunked analysis, 01/04/2026)
 | Vídeo | Duração | Clips | Cobertura | Fallback usado? |
@@ -204,11 +204,10 @@ Confirmar que a skill funciona para diferentes tipos de vídeo com o novo fluxo 
 ## Limitação atual
 
 - **Transcrição:** Whisper local (sem custo, sem limite)
-- **Análise:** `gemini-2.5-flash` — ~6 chamadas/run, 20 req/dia free tier
-- **Fallback:** `gemini-3-flash-preview` e `gemini-3.1-flash-lite-preview`
+- **Análise:** Modelos Flash descobertos dinamicamente via API (~6 chamadas/run), 20 req/dia por modelo no free tier
+- **Fallback:** Percorre todos os 9 modelos Flash até encontrar um com quota disponível
 - **Retry:** backoff automático para erros 503 (overload)
 - **Dependência:** faster-whisper (`pip install --user --break-system-packages faster-whisper`)
-  - Billing Tier 1: 1,000 req/dia, sem restrição de modelo
 
 ---
 
