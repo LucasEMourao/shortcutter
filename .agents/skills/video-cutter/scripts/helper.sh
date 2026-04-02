@@ -63,8 +63,8 @@ cmd_cut() {
   mkdir -p "$(dirname "$output")"
 
   echo "Cortando: ${start}s - ${end}s (${duration}s)"
-  ffmpeg -i "$video" -ss "$start" -t "$duration" \
-    -c:v libx264 -preset fast -crf 23 \
+  ffmpeg -ss "$start" -i "$video" -to "$end" \
+    -c:v libx264 -preset ultrafast -crf 23 \
     -c:a aac -movflags +faststart -pix_fmt yuv420p \
     "$output" -y 2>/dev/null
 

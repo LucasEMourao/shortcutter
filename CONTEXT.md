@@ -76,6 +76,19 @@
     - Se Google lançar novo modelo, será usado automaticamente sem alterar código
     - Resultado: cobertura equivalente, com mais opções de fallback
 
+12. **Análise adaptativa e FFmpeg otimizado** (02/04/2026):
+    - Descoberta: chunking é overkill para vídeos curtos (<5min)
+    - Implementamos `analyze_adaptive.py` com estratégia por duração:
+      - < 5min → análise direta (1 chamada API, economiza 50%)
+      - 5-10min → chunks de 4min (2-3 chamadas)
+      - > 10min → chunks de 3min (4-6 chamadas, padrão atual)
+    - Testado com sucesso: vídeo 4min (análise direta, 3 clips) e 13min (chunked, 14 clips)
+    - Timeout do FFmpeg resolvido: `preset fast` → `preset ultrafast`
+    - Stream copy testado mas descartado (cortes imprecisos por keyframe alignment)
+    - Ultrafast: 14 clips em ~3.5min (antes: timeout), precisão de timestamps perfeita
+    - Trade-off: arquivos 5-24x maiores que `preset fast` (CRF 23, ultrafast)
+    - Questão em aberto: ajustar CRF para reduzir tamanho dos arquivos?
+
 ## Estrutura atual do projeto
 
 ```
@@ -93,6 +106,7 @@
 │       │   │   ├── helper.sh        ← FFmpeg utils
 │       │   │   ├── run.sh           ← Automação completa
 │       │   │   ├── analyze_chunked.py ← Chunked analysis (3min chunks)
+│       │   │   ├── analyze_adaptive.py ← Análise adaptativa (<5min direto, >5min chunked)
 │       │   │   └── validate_cuts.py ← Validação de output
 │       │   ├── references/
 │       │   │   ├── prompts.md       ← Prompts Gemini detalhados
@@ -118,7 +132,11 @@
 │   ├── 20260326_1401/               ← Buffer 2.0s validado (vídeo 9min)
 │   ├── 20260331_0024/               ← Whisper validado (vídeo 13min)
 │   ├── 20260331_1439/               ← Chunked analysis (vídeo 13min)
-│   └── 20260331_1757/               ← Chunked analysis (vídeo 17min)
+│   ├── 20260331_1757/               ← Chunked analysis (vídeo 17min)
+│   ├── 20260402_0955/               ← Análise adaptativa direta (vídeo 4min)
+│   ├── 20260402_1020/               ← Stream copy test (vídeo 9min, descartado)
+│   ├── 20260402_1037/               ← Ultrafast test (vídeo 4min)
+│   └── 20260402_1040/               ← Ultrafast + adaptativo (vídeo 13min, 14 clips)
 └── skills-lock.json                 ← Gerado pelo npx skills
 ```
 
@@ -131,7 +149,9 @@
 - ✅ scripts/helper.sh com comandos FFmpeg
 - ✅ scripts/run.sh com automação completa
 - ✅ scripts/analyze_chunked.py com chunked analysis (3min chunks, overlap 5 segmentos)
+- ✅ scripts/analyze_adaptive.py com análise adaptativa (<5min direto, 5-10min chunks 4min, >10min chunks 3min)
 - ✅ scripts/validate_cuts.py com validação estrutural e de conteúdo
+- ✅ FFmpeg helper.sh com preset ultrafast (precisão de corte + velocidade, trade-off: arquivos maiores)
 - ✅ references/prompts.md com prompts Gemini otimizados
 - ✅ references/ffmpeg.md com comandos de referência
 - ✅ examples/examples.md com referências genéricas de qualidade
@@ -180,48 +200,54 @@ find ~/projetos/shortcutter/.agents -type f | sort
 2. Inicie nova conversa com o agente
 3. Cole este documento como contexto inicial
 4. Diga: "Continuar desenvolvimento da AgentSkill video-cutter"
-5. Status atual: Todos os 6 vídeos testados com chunked analysis + fallback de modelos
-6. Próximo passo: melhorias (legendas, templates, batch processing) ou produção
+5. Status atual: Análise adaptativa + FFmpeg ultrafast implementados e testados
+6. Questão em aberto: Ajustar CRF para reduzir tamanho dos arquivos? (atual: CRF 23, ultrafast, arquivos 5-24x maiores que preset fast)
+7. Próximo passo: Validar cortes gerados em players de vídeo, decidir sobre CRF
 
-## Resultados da última execução (20260331_1439 — Chunked Analysis)
+## Resultados da última execução (20260402_1040 — Ultrafast + Adaptativo)
 
-### Vídeo de 13min (data centers) — Chunked Analysis
+### Vídeo de 13min (data centers) — Ultrafast + Chunked Analysis
 
 | Corte | Timestamp | Duração | Score | Hook |
 |-------|-----------|---------|-------|------|
-| 1 | 7.5s–54.6s | 47.1s | 8.4 | curiosity_gap |
-| 2 | 100.8s–132.6s | 31.8s | 9.0 | result_first |
-| 3 | 132.6s–158.9s | 26.3s | 8.0 | controversial |
-| 4 | 203.0s–248.6s | 45.6s | 8.7 | curiosity_gap |
-| 5 | 251.8s–283.7s | 31.9s | 7.7 | pattern_interrupt |
-| 6 | 301.6s–339.2s | 37.6s | 8.7 | curiosity_gap |
-| 7 | 403.7s–421.0s | 17.2s | 8.0 | curiosity_gap |
-| 8 | 421.0s–470.2s | 49.2s | 9.0 | curiosity_gap |
-| 9 | 485.8s–511.8s | 26.0s | 8.7 | curiosity_gap |
-| 10 | 511.8s–555.9s | 44.1s | 8.4 | curiosity_gap |
-| 11 | 581.7s–619.7s | 38.0s | 8.4 | result_first |
-| 12 | 651.2s–686.9s | 35.7s | 8.4 | controversial |
-| 13 | 715.0s–731.9s | 16.9s | 7.7 | pattern_interrupt |
-| 14 | 773.1s–792.8s | 19.7s | 8.0 | controversial |
+| 1 | 13.0s–35.2s | 22.2s | 8.0 | pattern_interrupt |
+| 2 | 100.8s–134.6s | 33.8s | 9.4 | curiosity_gap |
+| 3 | 140.6s–158.9s | 18.3s | 8.6 | controversial |
+| 4 | 230.7s–253.8s | 23.1s | 8.4 | pain_point |
+| 5 | 268.8s–300.3s | 31.5s | 7.7 | curiosity_gap |
+| 6 | 313.8s–352.2s | 38.4s | 7.6 | result_first |
+| 7 | 384.3s–423.0s | 38.7s | 8.4 | curiosity_gap |
+| 8 | 438.8s–472.5s | 33.7s | 8.3 | result_first |
+| 9 | 472.5s–504.1s | 31.6s | 7.6 | pain_point |
+| 10 | 504.1s–555.9s | 51.8s | 8.4 | curiosity_gap |
+| 11 | 581.7s–619.7s | 38.0s | 8.7 | controversial |
+| 12 | 670.0s–689.4s | 19.4s | 8.4 | curiosity_gap |
+| 13 | 705.7s–736.9s | 31.2s | 7.7 | controversial |
+| 14 | 752.8s–781.8s | 29.0s | 8.0 | pattern_interrupt |
 
-**Melhoria vs sem chunking:**
-- Cortes: 5 → 14 (+180%)
-- Cobertura: 28.7% → 57.7% (+101%)
-- Final capturado: 513.8s → 792.8s (+279s)
+**FFmpeg:**
+- Preset: ultrafast (vs fast anterior)
+- Tempo de geração: ~3.5min (antes: timeout)
+- Precisão de corte: perfeita (todos os timestamps exatos)
+- Tamanho dos arquivos: 5-24x maior que preset fast
 
-### Vídeo de 17min (tutorial) — Chunked Analysis
+### Vídeo de 4min (curto) — Análise Direta (sem chunking)
 
-**Melhoria vs sem chunking:**
-- Cortes: 7 → 16 (+129%)
-- Cobertura: 21.7% → 44.2% (+104%)
-- Início capturado: 171.2s → 60.0s (+111s)
-- Final capturado: 845.3s → 1057.8s (+212s)
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 11.0s–41.0s | 30.0s | 7.85 | curiosity_gap |
+| 2 | 102.0s–131.0s | 29.0s | 8.85 | result_first |
+| 3 | 131.0s–168.0s | 37.0s | 8.05 | pattern_interrupt |
+| 4 | 180.0s–218.0s | 38.0s | 9.25 | curiosity_gap |
+
+**Economia:** 1 chamada API vs ~2 com chunking (50% menos)
 
 **Chunking info:**
-- Chunks de 3 minutos
+- Chunks de 3 minutos (>10min) ou 4 minutos (5-10min)
 - Overlap de 5 segmentos
 - Quality floor: viral_score >= 7.5
 - Merge inteligente remove duplicatas (>80% sobreposição)
+- Análise direta para vídeos < 5min
 
 ## Limitação atual
 
@@ -244,6 +270,12 @@ find ~/projetos/shortcutter/.agents -type f | sort
    - Merge inteligente remove duplicatas por sobreposição >80%
    - Quality floor: viral_score mínimo 7.5
    - Resultado: cobertura 2x maior, início e final capturados
+
+2. **Análise adaptativa:**
+   - < 5min: análise direta (1 chamada API, sem chunking)
+   - 5-10min: chunks de 4 minutos (2-3 chamadas)
+   - > 10min: chunks de 3 minutos (4-6 chamadas)
+   - Script: analyze_adaptive.py (substitui analyze_chunked.py no run.sh)
 
 2. **Anti-alucinação:**
    - Whisper é modelo dedicado para transcrição — não alucina

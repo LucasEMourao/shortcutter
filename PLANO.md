@@ -4,7 +4,7 @@
 Fazer a skill video-cutter funcionar com o mínimo de complexidade possível. Sem overengineering, sem frontend, sem banco de dados. Apenas: vídeo in → clips out.
 
 ## Status atual
-**MVP completo, validado e robusto.** Whisper transcreve localmente (sem API). Gemini analisa com chunked analysis (~6 chamadas/run). Fallback automático entre modelos quando quota esgota. Retry com backoff para erros 503. Todos os 6 vídeos de teste processados com sucesso (cobertura 79-98%). Próximo passo: melhorias ou produção.
+**MVP completo, validado e robusto.** Whisper transcreve localmente (sem API). Gemini analisa com análise adaptativa (<5min direto, >5min chunked). Fallback automático entre modelos quando quota esgota. Retry com backoff para erros 503. FFmpeg com preset ultrafast (precisão de corte + velocidade, trade-off: arquivos 5-24x maiores). Todos os 6 vídeos de teste processados com sucesso (cobertura 79-98%). Questão em aberto: ajustar CRF para reduzir tamanho dos arquivos? Próximo passo: validar cortes em players de vídeo.
 
 ---
 
@@ -128,6 +128,20 @@ Confirmar que a skill funciona para diferentes tipos de vídeo com o fluxo compl
 | Data centers | 13min | 14 | 0s-793s (100%) | Não |
 | Tutorial | 17min | 16 | 0s-1058s (100%) | Não |
 
+### 5.3 Vídeos testados (análise adaptativa, 02/04/2026)
+| Vídeo | Duração | Estratégia | Clips | Cobertura | FFmpeg |
+|-------|---------|------------|-------|-----------|--------|
+| Curto | 4min | Direta (1 chamada) | 4 | ~79% | Ultrafast, ~18s |
+| WhatsApp | 9min | Chunked 4min | 5 | ~79% | Ultrafast, ~2s |
+| Data centers | 13min | Chunked 3min | 14 | ~96% | Ultrafast, ~3.5min |
+
+### 5.4 Problema resolvido: FFmpeg timeout
+- **Problema:** `preset fast` causava timeout na geração de clips (re-encode lento)
+- **Testado:** Stream copy (`-c copy`) — rápido mas cortes imprecisos (keyframe alignment)
+- **Solução:** `preset ultrafast` — precisão perfeita + 15-30x mais rápido que `fast`
+- **Trade-off:** Arquivos 5-24x maiores (CRF 23, ultrafast)
+- **Questão em aberto:** Ajustar CRF para reduzir tamanho? (CRF 28 = menor qualidade, arquivos menores)
+
 ### 5.2 Vídeos para testar
 - Vlog / conversa direta com câmera
 - Entrevista / podcast
@@ -200,6 +214,10 @@ Confirmar que a skill funciona para diferentes tipos de vídeo com o fluxo compl
 8. **✅ Whisper substituiu Gemini para transcrição (sem alucinação)**
 9. **✅ Todos os 6 vídeos testados com chunked analysis (cobertura 79-98%)**
 10. **✅ Fallback de modelos implementado (2.5-flash → 3-flash → 3.1-flash-lite)**
+11. **✅ Análise adaptativa implementada (<5min direto, >5min chunked)**
+12. **✅ FFmpeg timeout resolvido (preset ultrafast)**
+13. **⏳ Validar cortes gerados em players de vídeo**
+14. **⏳ Decidir sobre CRF (reduzir tamanho dos arquivos?)**
 
 ## Limitação atual
 
