@@ -225,16 +225,16 @@ PYEOF
 # === Passo 5: Identificar cortes virais (com chunking) ===
 
 analyze_cuts() {
-  log "Passo 5: Analisando cortes virais (chunked)..."
+  log "Passo 5: Analisando cortes virais (adaptativo)..."
   
-  # Verificar se o script de chunked analysis existe
-  local chunked_script="$SKILL_DIR/scripts/analyze_chunked.py"
-  if [ ! -f "$chunked_script" ]; then
-    error "Script de chunked analysis não encontrado: $chunked_script"
+  # Usar script adaptativo (decide entre análise direta vs chunked baseado na duração)
+  local adaptive_script="$SKILL_DIR/scripts/analyze_adaptive.py"
+  if [ ! -f "$adaptive_script" ]; then
+    error "Script adaptativo não encontrado: $adaptive_script"
   fi
   
-  # Executar chunked analysis (modelo é descoberto dinamicamente via API)
-  python3 "$chunked_script" \
+  # Executar análise adaptativa (modelo é descoberto dinamicamente via API)
+  python3 "$adaptive_script" \
     "$TEMP_DIR/transcription_sanitized.json" \
     "$VIDEO_DURATION" \
     "$MODE" \
@@ -242,7 +242,7 @@ analyze_cuts() {
     "$GEMINI_API_KEY"
   
   if [ $? -ne 0 ]; then
-    error "Falha na análise chunked"
+    error "Falha na análise adaptativa"
   fi
   
   # Extrair cortes válidos para o formato esperado pelos próximos passos
