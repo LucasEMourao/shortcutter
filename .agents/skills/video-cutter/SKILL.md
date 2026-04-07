@@ -1,15 +1,16 @@
 ---
 name: video-cutter
-description: Corta vídeos automaticamente em clips curtos para Reels, TikTok e YouTube Shorts usando IA. Transcreve o áudio com Gemini, identifica os melhores momentos virais e gera MP4s prontos para publicação. Use quando o usuário mencionar cortar vídeo, gerar clips, analisar vídeo, encontrar momentos virais, criar Reels, TikTok ou Shorts.
+description: Corta vídeos automaticamente em clips curtos para Reels, TikTok e YouTube Shorts usando IA. Transcreve o áudio com Whisper (local), identifica os melhores momentos virais com Gemini e gera MP4s prontos para publicação. Use quando o usuário mencionar cortar vídeo, gerar clips, analisar vídeo, encontrar momentos virais, criar Reels, TikTok ou Shorts.
 disable-model-invocation: true
 allowed-tools: Bash, Read, Write
 ---
 
 # Video Cutter
 
-Gera cortes automáticos de vídeos curtos (Reels, TikTok, Shorts) usando Gemini para transcrição e FFmpeg para processamento.
+Gera cortes automáticos de vídeos curtos (Reels, TikTok, Shorts) usando Whisper para transcrição local, Gemini para análise viral e FFmpeg para processamento.
 
-Modelo: `gemini-3-flash-preview`
+**Transcrição:** faster-whisper small (local, CPU, sem API)
+**Análise:** Modelos Flash descobertos dinamicamente via API (/v1beta/models)
 
 ## Quick Start
 
@@ -55,12 +56,18 @@ Use `scripts/helper.sh info <video>` para diagnóstico rápido.
 ffmpeg -i <video> -vn -acodec pcm_s16le -ar 16000 -ac 1 /tmp/shortcutter_audio.wav -y
 ```
 
-### 3. Transcrever com Gemini
-Envie o áudio para Gemini com o prompt de transcrição.
+### 3. Transcrever com Whisper (local)
+```bash
+python3 -c "
+from faster_whisper import WhisperModel
+model = WhisperModel('small', device='cpu', compute_type='int8')
+segments, info = model.transcribe('audio.wav', language='pt', beam_size=5)
+# Salvar segmentos com start_sec, end_sec, text em JSON
+"
+```
 
-**IMPORTANTE:** Substitua `<DURAÇÃO>` no prompt pela duração real do vídeo obtida no Passo 1.
-
-**Referência:** [references/prompts.md](references/prompts.md) § Transcrição
+Transcrição local, sem API, sem custo, sem alucinação.
+**Referência:** `scripts/run.sh` § transcribe_audio
 
 ### 4. Sanitizar timestamps
 O Gemini frequentemente gera timestamps acima da duração real do vídeo (ex: 854s para vídeo de 535s). Sanitizar é OBRIGATÓRIO.
@@ -86,10 +93,20 @@ transcription = [
 ]
 ```
 
-### 5. Identificar cortes virais
-Use a transcrição sanitizada para identificar segmentos com potencial viral.
+### 5. Identificar cortes virais (análise adaptativa)
 
-**Referência:** [references/prompts.md](references/prompts.md) § Análise de Cortes
+**Estratégia automática por duração:**
+- `< 5min` → análise direta (1 chamada API)
+- `5-10min` → chunks de 4min (2-3 chamadas)
+- `> 10min` → chunks de 3min (4-6 chamadas)
+
+**Modelos:** descobertos dinamicamente via `/v1beta/models`, fallback automático entre todos os Flash disponíveis.
+
+```bash
+python3 scripts/analyze_adaptive.py transcription.json <duration> <mode> output.json <api_key>
+```
+
+**Referência:** `scripts/analyze_adaptive.py`
 
 ### 6. Validar timestamps dos cortes
 Para cada corte, validar:
@@ -131,11 +148,13 @@ mkdir -p "$RUN_DIR"
 
 Gerar cada corte válido:
 ```bash
-ffmpeg -i <video> -ss <start> -t <duration> \
-  -c:v libx264 -preset fast -crf 23 \
+ffmpeg -i <video> -ss <start> -to <end> \
+  -c:v libx264 -preset ultrafast -crf 23 \
   -c:a aac -movflags +faststart -pix_fmt yuv420p \
   "$RUN_DIR/cut_<NN>_<START>-<END>s.mp4" -y
 ```
+
+**Nota:** `preset ultrafast` garante precisão de corte (vs `fast` que pode timeout). Trade-off: arquivos 5-24x maiores que `preset fast`.
 
 ### 9. Gerar metadados
 Criar `$RUN_DIR/cuts.json` com todos os cortes e scores.
@@ -161,9 +180,12 @@ Para modo conservador, adicionar: `MODO CONSERVADOR: 1-3 cortes, narrativa compl
 | Vídeo não encontrado | Informar, sugerir verificar caminho |
 | FFmpeg ausente | `sudo apt install ffmpeg` |
 | API key ausente | Orientar configuração |
+| Whisper não instalado | `pip install faster-whisper` |
 | Sem áudio | Informar, sugerir narração |
 | Timestamp inválido | Descartar corte, continuar |
 | FFmpeg falha | Pular corte, tentar próximo |
+| 429 (quota) | Fallback para próximo modelo Flash |
+| 503 (overload) | Retry com backoff (10s/20s/30s) |
 
 ## Reference files
 
@@ -173,5 +195,7 @@ Para modo conservador, adicionar: `MODO CONSERVADOR: 1-3 cortes, narrativa compl
 
 ## Scripts
 
-- `scripts/run.sh` — Automação completa do fluxo (validação → transcrição → cortes → clips)
+- `scripts/run.sh` — Automação completa do fluxo (validação → Whisper → sanitização → análise adaptativa → buffer → clips)
 - `scripts/helper.sh` — Validação, extração de áudio e corte de vídeo
+- `scripts/analyze_adaptive.py` — Análise adaptativa (direta <5min, chunked >5min) com fallback de modelos
+- `scripts/validate_cuts.py` — Validação estrutural e de conteúdo dos cortes gerados

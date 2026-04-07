@@ -22,7 +22,7 @@ TEMP_DIR="/tmp/shortcutter_$$"
 PADDING_MAX=2.0
 MIN_DURATION=15
 MAX_DURATION=60
-GEMINI_MODEL="gemini-2.5-flash"
+GEMINI_MODEL=""  # Será preenchido dinamicamente pelo analyze_adaptive.py
 
 # === Funções auxiliares ===
 
@@ -463,7 +463,7 @@ output = {
     'input_video': "$VIDEO_NAME",
     'output_dir': f"./output/{run_dir_name}",
     'generated_at': datetime.now().isoformat() + 'Z',
-    'model': '$GEMINI_MODEL',
+    'model': analysis.get('model_used', 'unknown'),
     'mode': mode,
     'buffer_strategy': 'intelligent_gap_2s',
     'analysis': {
