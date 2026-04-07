@@ -507,6 +507,7 @@ def main():
         "analysis": all_analysis,
         "cuts": merged_cuts,
         "quality_warnings": all_warnings,
+        "model_used": models[min(current_model_idx, len(models)-1)] if models else "unknown",
         "chunking_info": {
             **chunks_info,
             "quality_floor": QUALITY_FLOOR,
