@@ -245,7 +245,9 @@ analyze_cuts() {
     error "Falha na análise adaptativa"
   fi
   
-  # Extrair cortes válidos para o formato esperado pelos próximos passos
+  # Extrair modelo usado e cortes válidos
+  GEMINI_MODEL=$(python3 -c "import json; f=open('$TEMP_DIR/analysis.json'); d=json.load(f); print(d.get('model_used','unknown'))")
+  
   python3 << PYEOF
 import json, sys
 
@@ -379,6 +381,17 @@ for i in range(len(cuts) - 1):
         cuts[i]['end_sec'] = cuts[i+1]['start_sec']
         cuts[i]['duration'] = round(cuts[i]['end_sec'] - cuts[i]['start_sec'], 1)
         print(f'  ⚠️  Cut {cuts[i]["id"]}: sobreposição corrigida → {cuts[i]["end_sec"]:.1f}s')
+
+# Remover cortes que ficaram abaixo de 15s após correções
+before_filter = len(cuts)
+cuts = [c for c in cuts if c['duration'] >= 15]
+removed = before_filter - len(cuts)
+if removed > 0:
+    print(f'  🗑️  {removed} corte(s) removido(s) por duração < 15s após correções')
+
+# Renumerar IDs
+for i, cut in enumerate(cuts):
+    cut['id'] = i + 1
 
 result = {
     'cuts': cuts,
