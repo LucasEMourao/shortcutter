@@ -89,6 +89,20 @@
     - Trade-off: arquivos 5-24x maiores que `preset fast` (CRF 23, ultrafast)
     - Questão em aberto: ajustar CRF para reduzir tamanho dos arquivos?
 
+13. **Teste completo com 6 vídeos + bug fixes** (09/04/2026):
+    - Rodou a skill em todos os 6 vídeos de teste (do menor para o maior)
+    - Todos processados com sucesso com cuts.json gerado
+    - Switchover de modelo automático funcionou (fallback gemini-3-flash → gemini-2.5-flash → gemini-3.1-flash-lite-preview)
+    - Bug encontrado e corrigido: GEMINI_MODEL ficava vazio no resumo final
+    - Bug encontrado e corrigido: cortes podiam ficar abaixo de 15s após correção de sobreposição
+    - Resultado detalhado por vídeo:
+      - 4min (curto): 4 clips, análise direta, scores 7.7-9.7
+      - 9min (WhatsApp): 6 clips, chunked 4min, scores 7.7-8.7
+      - 12min (standup): 13 clips, chunked 3min, scores 8.3-10.0
+      - 13min (data centers): 14 clips, chunked 3min, scores 7.7-9.0
+      - 15min (podcast): 13 clips, chunked 3min, scores 8.0-9.0
+      - 17min (tutorial): 13 clips, chunked 3min, scores 7.7-8.7 (1 clip <15s removido pelo fix)
+
 ## Estrutura atual do projeto
 
 ```
@@ -136,7 +150,13 @@
 │   ├── 20260402_0955/               ← Análise adaptativa direta (vídeo 4min)
 │   ├── 20260402_1020/               ← Stream copy test (vídeo 9min, descartado)
 │   ├── 20260402_1037/               ← Ultrafast test (vídeo 4min)
-│   └── 20260402_1040/               ← Ultrafast + adaptativo (vídeo 13min, 14 clips)
+│   ├── 20260402_1040/               ← Ultrafast + adaptativo (vídeo 13min, 14 clips)
+│   ├── 20260409_0955/               ← Vídeo 4min (4 clips, score 7.7-9.7)
+│   ├── 20260409_1000/               ← Vídeo 9min (6 clips, score 7.7-8.7)
+│   ├── 20260409_1020/               ← Vídeo 12min (13 clips, score 8.3-10.0)
+│   ├── 20260409_1032/               ← Vídeo 13min (14 clips, score 7.7-9.0)
+│   ├── 20260409_1044/               ← Vídeo 15min (13 clips, score 8.0-9.0)
+│   └── 20260409_1058/               ← Vídeo 17min (13 clips, score 7.7-8.7)
 └── skills-lock.json                 ← Gerado pelo npx skills
 ```
 
@@ -200,54 +220,107 @@ find ~/projetos/shortcutter/.agents -type f | sort
 2. Inicie nova conversa com o agente
 3. Cole este documento como contexto inicial
 4. Diga: "Continuar desenvolvimento da AgentSkill video-cutter"
-5. Status atual: Análise adaptativa + FFmpeg ultrafast implementados e testados
-6. Questão em aberto: Ajustar CRF para reduzir tamanho dos arquivos? (atual: CRF 23, ultrafast, arquivos 5-24x maiores que preset fast)
-7. Próximo passo: Validar cortes gerados em players de vídeo, decidir sobre CRF
+5. Status atual: Análise adaptativa + FFmpeg ultrafast + bug fixes aplicados
+6. Todos os 6 vídeos processados com sucesso (09/04/2026)
+7. Bugs corrigidos: GEMINI_MODEL vazio no resumo, cortes <15s após sobreposição
+8. Questão em aberto: Ajustar CRF para reduzir tamanho dos arquivos? (atual: CRF 23, ultrafast)
+9. Próximo passo: Validar cortes manualmente, decidir sobre CRF
 
-## Resultados da última execução (20260402_1040 — Ultrafast + Adaptativo)
+## Resultados da última execução completa (09/04/2026 — 6 vídeos)
 
-### Vídeo de 13min (data centers) — Ultrafast + Chunked Analysis
-
-| Corte | Timestamp | Duração | Score | Hook |
-|-------|-----------|---------|-------|------|
-| 1 | 13.0s–35.2s | 22.2s | 8.0 | pattern_interrupt |
-| 2 | 100.8s–134.6s | 33.8s | 9.4 | curiosity_gap |
-| 3 | 140.6s–158.9s | 18.3s | 8.6 | controversial |
-| 4 | 230.7s–253.8s | 23.1s | 8.4 | pain_point |
-| 5 | 268.8s–300.3s | 31.5s | 7.7 | curiosity_gap |
-| 6 | 313.8s–352.2s | 38.4s | 7.6 | result_first |
-| 7 | 384.3s–423.0s | 38.7s | 8.4 | curiosity_gap |
-| 8 | 438.8s–472.5s | 33.7s | 8.3 | result_first |
-| 9 | 472.5s–504.1s | 31.6s | 7.6 | pain_point |
-| 10 | 504.1s–555.9s | 51.8s | 8.4 | curiosity_gap |
-| 11 | 581.7s–619.7s | 38.0s | 8.7 | controversial |
-| 12 | 670.0s–689.4s | 19.4s | 8.4 | curiosity_gap |
-| 13 | 705.7s–736.9s | 31.2s | 7.7 | controversial |
-| 14 | 752.8s–781.8s | 29.0s | 8.0 | pattern_interrupt |
-
-**FFmpeg:**
-- Preset: ultrafast (vs fast anterior)
-- Tempo de geração: ~3.5min (antes: timeout)
-- Precisão de corte: perfeita (todos os timestamps exatos)
-- Tamanho dos arquivos: 5-24x maior que preset fast
-
-### Vídeo de 4min (curto) — Análise Direta (sem chunking)
+### Vídeo de 4min (curto) — Análise Direta
 
 | Corte | Timestamp | Duração | Score | Hook |
 |-------|-----------|---------|-------|------|
-| 1 | 11.0s–41.0s | 30.0s | 7.85 | curiosity_gap |
-| 2 | 102.0s–131.0s | 29.0s | 8.85 | result_first |
-| 3 | 131.0s–168.0s | 37.0s | 8.05 | pattern_interrupt |
-| 4 | 180.0s–218.0s | 38.0s | 9.25 | curiosity_gap |
+| 1 | 16s–65s | 49.0s | 8.4 | curiosity_gap |
+| 2 | 113s–138s | 25.0s | 8.7 | curiosity_gap |
+| 3 | 138s–168s | 30.0s | 7.7 | curiosity_gap |
+| 4 | 178s–218s | 40.0s | 9.7 | pattern_interrupt |
 
-**Economia:** 1 chamada API vs ~2 com chunking (50% menos)
+### Vídeo de 9min (WhatsApp) — Chunked 4min
 
-**Chunking info:**
-- Chunks de 3 minutos (>10min) ou 4 minutos (5-10min)
-- Overlap de 5 segmentos
-- Quality floor: viral_score >= 7.5
-- Merge inteligente remove duplicatas (>80% sobreposição)
-- Análise direta para vídeos < 5min
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 20s–61s | 41.0s | 8.4 | curiosity_gap |
+| 2 | 61s–88s | 27.0s | 8.0 | result_first |
+| 3 | 105s–126s | 21.0s | 8.0 | result_first |
+| 4 | 424s–448s | 24.0s | 7.7 | result_first |
+| 5 | 466s–483s | 17.0s | 8.7 | result_first |
+| 6 | 511s–528s | 17.0s | 8.3 | curiosity_gap |
+
+### Vídeo de 12min (standup) — Chunked 3min
+
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 47s–74s | 27.0s | 8.7 | controversial |
+| 2 | 74s–96s | 22.0s | 9.0 | pattern_interrupt |
+| 3 | 153s–178s | 25.0s | 10.0 | controversial |
+| 4 | 193s–218s | 25.0s | 8.3 | pattern_interrupt |
+| 5 | 264s–287s | 23.0s | 8.4 | curiosity_gap |
+| 6 | 303s–331s | 28.0s | 9.3 | controversial |
+| 7 | 342s–390s | 48.0s | 9.0 | controversial |
+| 8 | 432s–452s | 20.0s | 8.8 | curiosity_gap |
+| 9 | 491s–525s | 34.0s | 8.5 | controversial |
+| 10 | 539s–586s | 47.0s | 9.0 | curiosity_gap |
+| 11 | 616s–656s | 40.0s | 9.4 | controversial |
+| 12 | 662s–682s | 20.0s | 9.0 | pattern_interrupt |
+| 13 | 682s–712s | 30.0s | 8.4 | controversial |
+
+### Vídeo de 13min (data centers) — Chunked 3min
+
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 13s–35s | 22.2s | 8.0 | curiosity_gap |
+| 2 | 100s–134s | 33.8s | 9.0 | controversial |
+| 3 | 140s–162s | 22.3s | 8.0 | fomo |
+| 4 | 232s–253s | 20.8s | 8.7 | curiosity_gap |
+| 5 | 268s–296s | 27.8s | 7.7 | pattern_interrupt |
+| 6 | 367s–391s | 24.6s | 8.4 | curiosity_gap |
+| 7 | 403s–423s | 19.3s | 9.0 | pattern_interrupt |
+| 8 | 458s–479s | 21.7s | 8.0 | curiosity_gap |
+| 9 | 504s–553s | 49.8s | 8.1 | curiosity_gap |
+| 10 | 553s–581s | 27.8s | 8.7 | result_first |
+| 11 | 581s–619s | 38.0s | 8.0 | controversial |
+| 12 | 670s–689s | 19.4s | 8.7 | curiosity_gap |
+| 13 | 702s–724s | 21.0s | 8.0 | curiosity_gap |
+| 14 | 748s–781s | 33.6s | 7.7 | pattern_interrupt |
+
+### Vídeo de 15min (podcast) — Chunked 3min
+
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 0s–38s | 38.5s | 8.4 | curiosity_gap |
+| 2 | 83s–121s | 37.0s | 8.4 | controversial |
+| 3 | 126s–156s | 29.0s | 8.0 | curiosity_gap |
+| 4 | 253s–274s | 20.9s | 8.7 | curiosity_gap |
+| 5 | 282s–316s | 34.0s | 8.4 | controversial |
+| 6 | 323s–342s | 19.0s | 8.0 | pattern_interrupt |
+| 7 | 361s–383s | 22.0s | 9.0 | controversial |
+| 8 | 429s–466s | 37.0s | 8.0 | curiosity_gap |
+| 9 | 554s–577s | 23.0s | 8.7 | curiosity_gap |
+| 10 | 625s–646s | 21.0s | 8.7 | result_first |
+| 11 | 737s–779s | 42.0s | 8.7 | curiosity_gap |
+| 12 | 811s–854s | 43.0s | 9.0 | pattern_interrupt |
+| 13 | 854s–891s | 37.0s | 8.7 | controversial |
+
+### Vídeo de 17min (tutorial) — Chunked 3min
+
+| Corte | Timestamp | Duração | Score | Hook |
+|-------|-----------|---------|-------|------|
+| 1 | 92s–124s | 32.6s | 8.55 | result_first |
+| 2 | 149s–167s | 18.1s | 7.85 | fomo |
+| 3 | 181s–226s | 44.2s | 8.7 | fomo |
+| 4 | 279s–322s | 42.9s | 8.7 | result_first |
+| 5 | 343s–378s | 35.2s | 8.7 | result_first |
+| 6 | 452s–483s | 30.9s | 8.3 | pattern_interrupt |
+| 7 | 515s–549s | 33.6s | 8.7 | result_first |
+| 8 | 639s–671s | 31.9s | 8.0 | curiosity_gap |
+| 9 | 706s–724s | 18.3s | 8.7 | result_first |
+| 10 | 811s–845s | 33.7s | 8.4 | result_first |
+| 11 | 875s–910s | 35.7s | 7.7 | pain_point |
+| 12 | 997s–1018s | 20.2s | 8.4 | fomo |
+
+**Nota:** 13 cortes gerados, 1 removido por sobreposição resultar em duração <15s (cut 10 original: 798-811s = 12.9s)
 
 ## Limitação atual
 
@@ -314,3 +387,7 @@ find ~/projetos/shortcutter/.agents -type f | sort
 8. **Validação de output:**
    - validate_cuts.py: validação estrutural sem API
    - Opção --verify-content: usa Gemini para verificar se áudio real bate com JSON
+
+9. **Bug fixes (09/04/2026):**
+   - GEMINI_MODEL ficava vazio no resumo — agora extrai model_used do analysis.json
+   - Cortes podiam ficar abaixo de 15s após correção de sobreposição — agora removidos e renumerados
