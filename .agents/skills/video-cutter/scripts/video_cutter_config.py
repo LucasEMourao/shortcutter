@@ -1,0 +1,28 @@
+#!/usr/bin/env python3
+"""Shared configuration for the video-cutter pipeline."""
+
+PADDING_MAX_SEC = 2.0
+FIXED_BUFFER_SEC = 2.0
+
+MIN_CUT_DURATION = 15
+MAX_CUT_DURATION = 60
+QUALITY_FLOOR = 7.5
+
+CONSERVATIVE_MIN_CUT_DURATION = 20
+CONSERVATIVE_MAX_TOTAL_CUTS = 3
+
+CHUNK_DURATION_SHORT = 240
+CHUNK_DURATION_LONG = 180
+CHUNK_OVERLAP_SEGMENTS = 5
+
+DIRECT_ANALYSIS_THRESHOLD = 300
+MEDIUM_VIDEO_THRESHOLD = 600
+
+WHISPER_MODEL_SIZE = "small"
+WHISPER_LANGUAGE = "pt"
+
+DEFAULT_FALLBACK_MODELS = [
+    "gemini-3-flash-preview",
+    "gemini-2.5-flash",
+    "gemini-3.1-flash-lite-preview",
+]
