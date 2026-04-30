@@ -1,138 +1,118 @@
-# Manual Testing Guide for Video Cutter Skill
+# Testing Guide
 
-Este guia explica como testar manualmente os resultados gerados pela skill video-cutter para validar a qualidade dos cortes.
+Este projeto tem dois niveis de validacao:
 
-## 📋 Pré-requisitos
+- testes locais sem API para as etapas deterministicas
+- smoke/manual testing para o pipeline completo
 
-Antes de iniciar os testes manuais, certifique-se de que:
-1. A skill foi executada com sucesso: `./.agents/skills/video-cutter/scripts/run.sh ./video.mp4`
-2. Existe um diretório de output em `./output/YYYYMMDD_HHMM/`
-3. O diretório contém o arquivo `cuts.json` e os clips MP4
+## 1. Baseline automatizada
 
-## 🔍 Etapas de Teste Manual
+Antes de gastar quota da API ou gerar novos clips, rode:
 
-### 1. Verificação Estrutural Básica
+```bash
+./.agents/skills/video-cutter/scripts/bootstrap_wsl.sh
+bash -n ./.agents/skills/video-cutter/scripts/run.sh
+python3 -m py_compile ./.agents/skills/video-cutter/scripts/*.py
+python3 -m unittest discover -s tests -p "test_*.py"
+```
 
-Verifique se o diretório de output contém:
-- `cuts.json` - arquivo de metadados principal
-- Clips MP4 nomeados no padrão: `cut_NN_INICIO-FIMs.mp4`
+O que isso cobre:
+
+- normalizacao CRLF/LF no WSL
+- permissao de execucao dos scripts `.sh`
+- integridade sintatica do shell
+- integridade sintatica dos scripts Python
+- regras deterministicas de sanitizacao, validacao, buffer e metadata
+
+## 2. Smoke test do pipeline
+
+Use o video curto para um run de ponta a ponta:
+
+```bash
+./.agents/skills/video-cutter/scripts/run.sh ./test/videoCurtoParaTeste4min.mp4 ./output/smoke aggressive
+./.agents/skills/video-cutter/scripts/run.sh ./test/videoCurtoParaTeste4min.mp4 ./output/smoke_conservative conservative
+```
+
+Depois valide o output gerado:
+
+```bash
+python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/smoke/YYYYMMDD_HHMM
+python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/smoke_conservative/YYYYMMDD_HHMM
+```
+
+## 3. Validacao estrutural manual
+
+Confira se o diretorio de output contem:
+
+- `cuts.json`
+- clips MP4 no formato `cut_NN_INICIO-FIMs.mp4`
+
+Exemplo:
 
 ```bash
 ls -la ./output/YYYYMMDD_HHMM/
 ```
 
-### 2. Validação do cuts.json
+## 4. Validacao dos clips
 
-Abra o arquivo `cuts.json` e verifique:
+### Duracao real
 
-#### Campos obrigatórios:
-- `input_video`: nome do vídeo original
-- `output_dir`: caminho do diretório de output
-- `generated_at`: timestamp de geração
-- `model`: modelo de IA usado para análise
-- `mode`: agressivo ou conservative
-- `cuts`: array de objetos de corte
-
-#### Estrutura de cada corte:
-```json
-{
-  "filename": "cut_01_12-38s.mp4",
-  "path": "./output/20260407_1517/cut_01_12-38s.mp4",
-  "start_sec": 12.5,
-  "end_sec": 38.2,
-  "duration": 25.7,
-  "hook_type": "pattern_interrupt",
-  "hook_power": 9,
-  "retention_potential": 8,
-  "shareability": 7,
-  "viral_score": 8.1,
-  "content": "Transcrição do segmento...",
-  "reason": "Por que este corte funciona..."
-}
-```
-
-### 3. Validação dos Clips MP4
-
-Para cada clip MP4, verifique:
-
-#### Nome do arquivo bate com timestamps:
-- Formato esperado: `cut_NN_INICIO-FIMs.mp4`
-- INICIO e FIM devem corresponder (aproximadamente) a `start_sec` e `end_sec` do JSON
-
-#### Duração do clip:
-Use o comando abaixo para verificar a duração real:
 ```bash
 ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 ./output/YYYYMMDD_HHMM/cut_01_12-38s.mp4
 ```
 
-A duração deve estar entre 15-60 segundos e corresponder ao campo `duration` no JSON (±1 segundo devido ao buffer).
+A duracao deve ficar entre `15` e `60` segundos e bater com o `cuts.json` com tolerancia de aproximadamente `1s`.
 
-#### Arquivo não está corrompido:
+### Integridade do arquivo
+
 ```bash
 ffmpeg -v error -i ./output/YYYYMMDD_HHMM/cut_01_12-38s.mp4 -f null -
 ```
-Se não houver output, o arquivo está OK.
 
-### 4. Verificação de Buffer Inteligente
+Se nao houver output, o clip esta estruturalmente valido.
 
-Verifique se o buffer foi aplicado corretamente olhando para:
-- Gaps entre cortes consecutivos (devem ser ≥ 0s após correção de sobreposição)
-- Extensão de cortes para evitar cortes no meio de frases
+## 5. Validacao de conteudo opcional
 
-### 5. Teste de Reprodução
+Esse modo usa API para conferir se a transcricao do corte parece coerente com o audio:
 
-Reproduza alguns clips para verificar qualidade audiovisual:
-- O áudio está claro e sincronizado?
-- O vídeo começa e termina em pontos de fala completa?
-- Não há cortes abruptos no meio de palavras/frases?
-
-### 6. Validação de Conteúdo (Opcional - consome API)
-
-Para validar se o conteúdo transcrito corresponde ao áudio real:
 ```bash
-python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/YYYYMMDD_HHMM/ --verify-content
+python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/YYYYMMDD_HHMM --verify-content
 ```
 
-> ⚠️ Atenção: Este teste consome aproximadamente 1 requisição API por corte.
+Use apenas quando realmente precisar, porque isso consome requisicoes adicionais.
 
-## 📊 Critérios de Aceitação
+## 6. Criterios de aprovacao
 
-Um teste é considerado aprovado se:
+Um run esta aprovado quando:
 
-1. **Estrutura**: cuts.json válido e clips MP4 presentes
-2. **Timestamps**: Todos os cortes respeitam os limites do vídeo original
-3. **Duração**: 15s ≤ duração ≤ 60s para todos os clips
-4. **Sobreposição**: Nenhum corte sobrepõe outro (após aplicação do buffer)
-5. **Buffer**: Gaps entre cortes são razoáveis (0-4s típico)
-6. **Nomeclatura**: Nome dos arquivos bate com timestamps do JSON
-7. **Reprodução**: Clips podem ser reproduzidos sem erros
-8. **Qualidade**: viral_score ≥ 7.5 para todos os cortes (quality floor)
+1. `cuts.json` existe e os MP4s referenciados existem
+2. todos os cortes respeitam os limites do video original
+3. todas as duracoes finais ficam entre `15s` e `60s`
+4. nao ha sobreposicao invalida entre cortes
+5. o nome dos arquivos bate com os timestamps do JSON
+6. os clips reproduzem sem erro
+7. o `viral_score` respeita o quality floor esperado
 
-## 🐛 Troubleshooting Common Issues
+## 7. Troubleshooting
 
-### Problema: "ffprobe não encontrado"
-**Solução:** `sudo apt install ffmpeg`
+### `ffprobe nao encontrado`
 
-### Problema: Clips muito grandes
-**Nota:** É esperado com preset ultrafast - trade-off entre velocidade/tamanho
-Para reduzir tamanho, modifique CRF em helper.sh (valor maior = qualidade menor)
+```bash
+sudo apt install -y ffmpeg
+```
 
-### Problema: Sobreposição entre cortes
-**Verificar:** Se o buffer inteligente foi aplicado corretamente no passo 7
-**Solução:** Pode indicar problema na ordenação ou correção de sobreposição
+### `faster-whisper nao instalado`
 
-### Problema: Clips muito pequenos (<15s)
-**Verificar:** Se o quality floor ou validação de duração está funcionando
-**Solução:** Re-executar com análise mais rigorosa
+```bash
+python3 -m pip install --user --break-system-packages -r requirements.txt
+```
 
-## 📞 Próximos Passos
+### Script falha por CRLF ou permissao no WSL
 
-Após validar manualmente os resultados:
-1. Anote quaisquer problemas encontrados
-2. Sugira melhorias se necessário
-3. Estamos prontos para passar para a próxima etapa de desenvolvimento
+```bash
+./.agents/skills/video-cutter/scripts/bootstrap_wsl.sh
+```
 
----
-*Este guia deve ser usado em conjunto com os scripts de validação automática existentes:*
-- `./.agents/skills/video-cutter/scripts/validate_cuts.py` (validação estrutural)
-- `./.agents/skills/video-cutter/scripts/helper.sh` (funções FFmpeg úteis)
+### Clips muito grandes
+
+Hoje isso e esperado por causa do `preset ultrafast` no `helper.sh`. O ajuste de `CRF` continua sendo uma decisao futura do projeto.

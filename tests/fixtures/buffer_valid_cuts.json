@@ -1,0 +1,22 @@
+[
+  {
+    "id": 1,
+    "start_sec": 0.0,
+    "end_sec": 20.0,
+    "duration": 20.0,
+    "hook_type": "curiosity_gap",
+    "viral_score": 8.0,
+    "content": "Conteudo A",
+    "reason": "Funciona"
+  },
+  {
+    "id": 2,
+    "start_sec": 19.0,
+    "end_sec": 39.0,
+    "duration": 20.0,
+    "hook_type": "result_first",
+    "viral_score": 8.5,
+    "content": "Conteudo B",
+    "reason": "Funciona"
+  }
+]

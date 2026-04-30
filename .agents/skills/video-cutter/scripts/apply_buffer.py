@@ -110,7 +110,7 @@ def main():
 
     validated_cuts = []
     buffer_details = []
-    for next_id, cut in enumerate(cuts, start=1):
+    for cut in cuts:
         cut["duration"] = round(cut["end_sec"] - cut["start_sec"], 1)
         problems = get_cut_problems(cut, video_duration, min_duration, MAX_CUT_DURATION)
         if problems:
@@ -120,6 +120,7 @@ def main():
             )
             continue
 
+        next_id = len(validated_cuts) + 1
         detail = cut.pop("_buffer_detail")
         detail["id"] = next_id
         detail["final_duration"] = cut["duration"]

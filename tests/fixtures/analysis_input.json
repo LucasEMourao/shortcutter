@@ -1,0 +1,24 @@
+{
+  "cuts": [
+    {
+      "id": 1,
+      "start_sec": 0.0,
+      "end_sec": 21.0
+    },
+    {
+      "id": 2,
+      "start_sec": 25.0,
+      "end_sec": 44.0
+    },
+    {
+      "id": 3,
+      "start_sec": 40.0,
+      "end_sec": 101.0
+    },
+    {
+      "id": 4,
+      "start_sec": 110.0,
+      "end_sec": 100.0
+    }
+  ]
+}

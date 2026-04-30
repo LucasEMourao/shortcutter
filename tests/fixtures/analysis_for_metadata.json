@@ -1,0 +1,18 @@
+{
+  "analysis": {
+    "content_type": "tutorial",
+    "main_topics": [
+      "hooks",
+      "retencao"
+    ],
+    "overall_viral_potential": 8.4
+  },
+  "quality_warnings": [
+    "warning existente"
+  ],
+  "model_used": "gemini-3-flash-preview",
+  "chunking_info": {
+    "strategy": "direct",
+    "total_chunks": 1
+  }
+}
