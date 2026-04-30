@@ -24,6 +24,22 @@ O que isso cobre:
 - integridade sintatica dos scripts Python
 - regras deterministicas de sanitizacao, validacao, buffer e metadata
 
+## 1.1 Benchmark de encoding
+
+Para comparar `CRF` em um trecho fixo:
+
+```bash
+python3 ./.agents/skills/video-cutter/scripts/benchmark_encoding.py \
+  ./test/videoCurtoParaTeste4min.mp4 \
+  102 \
+  133 \
+  ./output/benchmark_crf \
+  --preset ultrafast \
+  --crfs 23,28,32
+```
+
+Depois revise os arquivos gerados e use [QUALITY_ACCEPTANCE.md](./QUALITY_ACCEPTANCE.md) como checklist.
+
 ## 2. Smoke test do pipeline
 
 Use o video curto para um run de ponta a ponta:
@@ -115,4 +131,4 @@ python3 -m pip install --user --break-system-packages -r requirements.txt
 
 ### Clips muito grandes
 
-Hoje isso e esperado por causa do `preset ultrafast` no `helper.sh`. O ajuste de `CRF` continua sendo uma decisao futura do projeto.
+Agora isso pode ser comparado de forma reproduzivel com `benchmark_encoding.py`. O baseline atual continua sendo `preset ultrafast` com `CRF 23`.

@@ -23,6 +23,14 @@ def main():
     print(f"Clips: {data['total_cuts']}")
     print(f"Modelo: {data.get('model', 'unknown')}")
     print(f"Modo: {data.get('mode', 'unknown')}")
+    encoding = data.get("encoding", {})
+    if encoding:
+        print(
+            "Encoding: "
+            f"{encoding.get('video_codec', 'unknown')} "
+            f"preset={encoding.get('preset', 'unknown')} "
+            f"crf={encoding.get('crf', 'unknown')}"
+        )
     print("")
     print("Resumo:")
     for cut in data["cuts"]:

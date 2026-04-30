@@ -21,14 +21,18 @@ def make_temp_dir():
 class PipelineStepTests(unittest.TestCase):
     maxDiff = None
 
-    def run_script(self, script_name, *args):
+    def run_script(self, script_name, *args, env=None):
         command = [sys.executable, str(SCRIPTS_DIR / script_name), *[str(arg) for arg in args]]
+        merged_env = os.environ.copy()
+        if env:
+            merged_env.update(env)
         result = subprocess.run(
             command,
             cwd=ROOT,
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            env=merged_env
         )
         self.assertEqual(
             result.returncode,
@@ -127,12 +131,21 @@ class PipelineStepTests(unittest.TestCase):
                 run_dir,
                 project_dir,
                 "video.mp4",
-                output_path
+                output_path,
+                env={
+                    "SHORTCUTTER_FFMPEG_PRESET": "ultrafast",
+                    "SHORTCUTTER_FFMPEG_CRF": "28",
+                    "SHORTCUTTER_VIDEO_CODEC": "libx264",
+                    "SHORTCUTTER_AUDIO_CODEC": "aac",
+                    "SHORTCUTTER_PIX_FMT": "yuv420p",
+                }
             )
 
             payload = json.loads(output_path.read_text(encoding="utf-8"))
             self.assertEqual(payload["output_dir"], "./output/run_001")
             self.assertEqual(payload["total_cuts"], 1)
+            self.assertEqual(payload["encoding"]["preset"], "ultrafast")
+            self.assertEqual(payload["encoding"]["crf"], 28)
             self.assertIn("warning existente", payload["quality_warnings"])
             self.assertIn("Falha ao gerar cut_02_40-70s.mp4: ffmpeg failed", payload["quality_warnings"])
 

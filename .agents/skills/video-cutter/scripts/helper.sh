@@ -1,49 +1,67 @@
 #!/bin/bash
-# helper.sh - Utilitários FFmpeg para video-cutter skill
+# helper.sh - Utilitarios FFmpeg para video-cutter
 # Uso: scripts/helper.sh <comando> [argumentos]
 
 set -e
 
-# Funções
+SHORTCUTTER_VIDEO_CODEC="${SHORTCUTTER_VIDEO_CODEC:-libx264}"
+SHORTCUTTER_AUDIO_CODEC="${SHORTCUTTER_AUDIO_CODEC:-aac}"
+SHORTCUTTER_FFMPEG_PRESET="${SHORTCUTTER_FFMPEG_PRESET:-ultrafast}"
+SHORTCUTTER_FFMPEG_CRF="${SHORTCUTTER_FFMPEG_CRF:-23}"
+SHORTCUTTER_PIX_FMT="${SHORTCUTTER_PIX_FMT:-yuv420p}"
+
 usage() {
   echo "Uso: $0 <comando> [argumentos]"
   echo ""
   echo "Comandos:"
-  echo "  info <video>                    - Mostra informações do vídeo"
-  echo "  extract-audio <video> [output]  - Extrai áudio para análise"
+  echo "  info <video>                    - Mostra informacoes do video"
+  echo "  extract-audio <video> [output]  - Extrai audio para analise"
   echo "  cut <video> <start> <end> <out> - Corta um segmento"
+  echo "  encoding-config                 - Mostra config atual de encoding"
   echo "  validate <video> <start> <end>  - Valida timestamps"
   echo ""
 }
 
+validate_encoding_settings() {
+  if ! [[ "$SHORTCUTTER_FFMPEG_CRF" =~ ^[0-9]+$ ]]; then
+    echo "Erro: SHORTCUTTER_FFMPEG_CRF deve ser inteiro entre 0 e 51"
+    exit 1
+  fi
+
+  if (( SHORTCUTTER_FFMPEG_CRF < 0 || SHORTCUTTER_FFMPEG_CRF > 51 )); then
+    echo "Erro: SHORTCUTTER_FFMPEG_CRF deve estar entre 0 e 51"
+    exit 1
+  fi
+}
+
 cmd_info() {
   local video="$1"
-  [ -z "$video" ] && { echo "Erro: Caminho do vídeo não fornecido"; exit 1; }
-  [ ! -f "$video" ] && { echo "Erro: Arquivo não encontrado: $video"; exit 1; }
+  [ -z "$video" ] && { echo "Erro: Caminho do video nao fornecido"; exit 1; }
+  [ ! -f "$video" ] && { echo "Erro: Arquivo nao encontrado: $video"; exit 1; }
 
-  echo "=== Informações do Vídeo ==="
+  echo "=== Informacoes do Video ==="
   echo "Arquivo: $(basename "$video")"
-  echo "Duração: $(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video")s"
-  echo "Resolução: $(ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$video")"
+  echo "Duracao: $(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video")s"
+  echo "Resolucao: $(ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height -of csv=s=x:p=0 "$video")"
   echo "FPS: $(ffprobe -v quiet -select_streams v:0 -show_entries stream=r_frame_rate -of default=noprint_wrappers=1:nokey=1 "$video")"
-  echo "Tem áudio: $(ffprobe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video" | grep -q . && echo 'Sim' || echo 'Não')"
+  echo "Tem audio: $(ffprobe -v quiet -select_streams a:0 -show_entries stream=codec_name -of default=noprint_wrappers=1:nokey=1 "$video" | grep -q . && echo 'Sim' || echo 'Nao')"
 }
 
 cmd_extract_audio() {
   local video="$1"
   local output="${2:-/tmp/shortcutter_audio_${RANDOM}.wav}"
 
-  [ -z "$video" ] && { echo "Erro: Caminho do vídeo não fornecido"; exit 1; }
-  [ ! -f "$video" ] && { echo "Erro: Arquivo não encontrado: $video"; exit 1; }
+  [ -z "$video" ] && { echo "Erro: Caminho do video nao fornecido"; exit 1; }
+  [ ! -f "$video" ] && { echo "Erro: Arquivo nao encontrado: $video"; exit 1; }
 
-  echo "Extraindo áudio..."
+  echo "Extraindo audio..."
   ffmpeg -i "$video" -vn -acodec pcm_s16le -ar 16000 -ac 1 "$output" -y 2>/dev/null
 
   if [ $? -eq 0 ]; then
-    echo "Áudio extraído: $output"
+    echo "Audio extraido: $output"
     echo "$output"
   else
-    echo "Erro ao extrair áudio"
+    echo "Erro ao extrair audio"
     exit 1
   fi
 }
@@ -57,23 +75,34 @@ cmd_cut() {
     exit 1
   }
 
-  [ ! -f "$video" ] && { echo "Erro: Arquivo não encontrado: $video"; exit 1; }
+  [ ! -f "$video" ] && { echo "Erro: Arquivo nao encontrado: $video"; exit 1; }
 
-  local duration=$(echo "$end - $start" | bc)
+  local duration
+  duration=$(echo "$end - $start" | bc)
   mkdir -p "$(dirname "$output")"
 
   echo "Cortando: ${start}s - ${end}s (${duration}s)"
   ffmpeg -ss "$start" -i "$video" -t "$duration" \
-    -c:v libx264 -preset ultrafast -crf 23 \
-    -c:a aac -movflags +faststart -pix_fmt yuv420p \
+    -c:v "$SHORTCUTTER_VIDEO_CODEC" -preset "$SHORTCUTTER_FFMPEG_PRESET" -crf "$SHORTCUTTER_FFMPEG_CRF" \
+    -c:a "$SHORTCUTTER_AUDIO_CODEC" -movflags +faststart -pix_fmt "$SHORTCUTTER_PIX_FMT" \
     "$output" -y 2>/dev/null
 
   if [ $? -eq 0 ]; then
     echo "Corte gerado: $output"
   else
-    echo "Erro ao cortar vídeo"
+    echo "Erro ao cortar video"
     exit 1
   fi
+}
+
+cmd_encoding_config() {
+  echo "{"
+  echo "  \"video_codec\": \"$SHORTCUTTER_VIDEO_CODEC\","
+  echo "  \"audio_codec\": \"$SHORTCUTTER_AUDIO_CODEC\","
+  echo "  \"preset\": \"$SHORTCUTTER_FFMPEG_PRESET\","
+  echo "  \"crf\": $SHORTCUTTER_FFMPEG_CRF,"
+  echo "  \"pix_fmt\": \"$SHORTCUTTER_PIX_FMT\""
+  echo "}"
 }
 
 cmd_validate() {
@@ -85,54 +114,57 @@ cmd_validate() {
     exit 1
   }
 
-  [ ! -f "$video" ] && { echo "INVALID: Arquivo não encontrado"; exit 1; }
+  [ ! -f "$video" ] && { echo "INVALID: Arquivo nao encontrado"; exit 1; }
 
-  local video_duration=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video")
+  local video_duration
+  video_duration=$(ffprobe -v quiet -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 "$video")
 
   if (( $(echo "$start < 0" | bc -l) )); then
     echo "INVALID: start_sec ($start) < 0"; exit 1
   fi
 
   if (( $(echo "$end > $video_duration" | bc -l) )); then
-    echo "INVALID: end_sec ($end) > duração ($video_duration)"; exit 1
+    echo "INVALID: end_sec ($end) > duracao ($video_duration)"; exit 1
   fi
 
   if (( $(echo "$end <= $start" | bc -l) )); then
     echo "INVALID: end_sec ($end) <= start_sec ($start)"; exit 1
   fi
 
-  local duration=$(echo "$end - $start" | bc)
+  local duration
+  duration=$(echo "$end - $start" | bc)
   if (( $(echo "$duration < 15" | bc -l) )); then
-    echo "INVALID: duração ($duration) < 15s mínimo"; exit 1
+    echo "INVALID: duracao ($duration) < 15s minimo"; exit 1
   fi
 
   if (( $(echo "$duration > 60" | bc -l) )); then
-    echo "INVALID: duração ($duration) > 60s máximo"; exit 1
+    echo "INVALID: duracao ($duration) > 60s maximo"; exit 1
   fi
 
   echo "VALID: ${start}s - ${end}s (${duration}s)"
 }
 
-# Verificar dependências
 check_dependencies() {
+  validate_encoding_settings
+
   for cmd in ffmpeg ffprobe bc; do
     if ! command -v "$cmd" &> /dev/null; then
-      echo "Erro: $cmd não está instalado"
+      echo "Erro: $cmd nao esta instalado"
       echo "Instale com: sudo apt install $cmd"
       exit 1
     fi
   done
 }
 
-# Main
 check_dependencies
 
 case "${1:-help}" in
-  info)          cmd_info "$2" ;;
-  extract-audio) cmd_extract_audio "$2" "$3" ;;
-  cut)           cmd_cut "$2" "$3" "$4" "$5" ;;
-  validate)      cmd_validate "$2" "$3" "$4" ;;
-  help|--help|-h) usage ;;
+  info)            cmd_info "$2" ;;
+  extract-audio)   cmd_extract_audio "$2" "$3" ;;
+  cut)             cmd_cut "$2" "$3" "$4" "$5" ;;
+  encoding-config) cmd_encoding_config ;;
+  validate)        cmd_validate "$2" "$3" "$4" ;;
+  help|--help|-h)  usage ;;
   *)
     echo "Erro: Comando desconhecido: $1"
     usage

@@ -8,6 +8,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$SCRIPT_DIR")"
 PROJECT_DIR="$(cd "$SKILL_DIR/../../.." && pwd)"
 TEMP_DIR="/tmp/shortcutter_$$"
+SHORTCUTTER_VIDEO_CODEC="${SHORTCUTTER_VIDEO_CODEC:-libx264}"
+SHORTCUTTER_AUDIO_CODEC="${SHORTCUTTER_AUDIO_CODEC:-aac}"
+SHORTCUTTER_FFMPEG_PRESET="${SHORTCUTTER_FFMPEG_PRESET:-ultrafast}"
+SHORTCUTTER_FFMPEG_CRF="${SHORTCUTTER_FFMPEG_CRF:-23}"
+SHORTCUTTER_PIX_FMT="${SHORTCUTTER_PIX_FMT:-yuv420p}"
 
 log() {
   echo "[$(date +%H:%M:%S)] $1"
@@ -50,7 +55,16 @@ check_dependencies() {
     fi
   fi
 
+  if ! [[ "$SHORTCUTTER_FFMPEG_CRF" =~ ^[0-9]+$ ]]; then
+    error "SHORTCUTTER_FFMPEG_CRF deve ser inteiro entre 0 e 51"
+  fi
+
+  if (( SHORTCUTTER_FFMPEG_CRF < 0 || SHORTCUTTER_FFMPEG_CRF > 51 )); then
+    error "SHORTCUTTER_FFMPEG_CRF deve estar entre 0 e 51"
+  fi
+
   log "OK dependencias verificadas"
+  log "Encoding: preset=$SHORTCUTTER_FFMPEG_PRESET crf=$SHORTCUTTER_FFMPEG_CRF codec=$SHORTCUTTER_VIDEO_CODEC"
 }
 
 validate_input() {
@@ -237,6 +251,7 @@ main() {
   echo "Video Cutter - Iniciando..."
   echo "  Video: $(basename "$VIDEO_PATH")"
   echo "  Modo: $MODE"
+  echo "  Encoding: preset=$SHORTCUTTER_FFMPEG_PRESET crf=$SHORTCUTTER_FFMPEG_CRF"
   echo ""
 
   check_dependencies

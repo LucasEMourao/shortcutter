@@ -55,6 +55,24 @@ Esse script:
 
 ## Como usar
 
+### Override de encoding
+
+O pipeline aceita override por variaveis de ambiente:
+
+```bash
+SHORTCUTTER_FFMPEG_PRESET=ultrafast \
+SHORTCUTTER_FFMPEG_CRF=28 \
+./.agents/skills/video-cutter/scripts/run.sh ./video.mp4
+```
+
+Defaults atuais:
+
+- `SHORTCUTTER_FFMPEG_PRESET=ultrafast`
+- `SHORTCUTTER_FFMPEG_CRF=23`
+- `SHORTCUTTER_VIDEO_CODEC=libx264`
+- `SHORTCUTTER_AUDIO_CODEC=aac`
+- `SHORTCUTTER_PIX_FMT=yuv420p`
+
 ### Execucao padrao
 
 ```bash
@@ -98,6 +116,22 @@ Depois de um run completo:
 python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/YYYYMMDD_HHMM
 ```
 
+### Benchmark de CRF
+
+Para comparar tamanho e tempo entre variantes de `CRF` em um mesmo trecho:
+
+```bash
+python3 ./.agents/skills/video-cutter/scripts/benchmark_encoding.py \
+  ./test/videoCurtoParaTeste4min.mp4 \
+  102 \
+  133 \
+  ./output/benchmark_crf \
+  --preset ultrafast \
+  --crfs 23,28,32
+```
+
+Os criterios de aceite estao em [QUALITY_ACCEPTANCE.md](./QUALITY_ACCEPTANCE.md).
+
 ## Smoke test recomendado
 
 Use o video curto incluido no ambiente para um teste de ponta a ponta:
@@ -130,6 +164,7 @@ python3 ./.agents/skills/video-cutter/scripts/validate_cuts.py ./output/smoke/YY
 │   └── test_*.py
 ├── CONTEXT.md
 ├── PLANO.md
+├── QUALITY_ACCEPTANCE.md
 ├── TESTING.md
 └── requirements.txt
 ```

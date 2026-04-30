@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Generate the final cuts.json metadata file."""
 
+import os
 import sys
 from datetime import datetime
 
@@ -26,6 +27,13 @@ def main():
 
     data = load_json(final_cuts_path)
     analysis = load_json(analysis_path)
+    encoding = {
+        "video_codec": os.environ.get("SHORTCUTTER_VIDEO_CODEC", "libx264"),
+        "audio_codec": os.environ.get("SHORTCUTTER_AUDIO_CODEC", "aac"),
+        "preset": os.environ.get("SHORTCUTTER_FFMPEG_PRESET", "ultrafast"),
+        "crf": int(os.environ.get("SHORTCUTTER_FFMPEG_CRF", "23")),
+        "pix_fmt": os.environ.get("SHORTCUTTER_PIX_FMT", "yuv420p"),
+    }
 
     quality_warnings = list(analysis.get("quality_warnings", []))
     for failure in data.get("clip_failures", []):
@@ -40,6 +48,7 @@ def main():
         "model": analysis.get("model_used", "unknown"),
         "mode": mode,
         "buffer_strategy": "intelligent_gap_2s",
+        "encoding": encoding,
         "analysis": {
             "content_type": analysis["analysis"]["content_type"],
             "main_topics": analysis["analysis"]["main_topics"],
