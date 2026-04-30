@@ -27,6 +27,8 @@ CHUNK_OVERLAP_SEGMENTS = 5
 QUALITY_FLOOR = 7.5
 MIN_CUT_DURATION = 15
 MAX_CUT_DURATION = 60
+CONSERVATIVE_MIN_CUT_DURATION = 20
+CONSERVATIVE_MAX_TOTAL_CUTS = 3
 
 # Thresholds
 DIRECT_ANALYSIS_THRESHOLD = 300    # 5 minutos - abaixo disso, análise direta
@@ -83,9 +85,15 @@ def create_chunks(transcription, video_duration, chunk_duration):
 def build_direct_prompt(transcription, video_duration, mode):
     """Constrói prompt para análise direta (sem chunking)."""
     transcription_json = json.dumps(transcription, ensure_ascii=False)
-    
+
+    min_duration = MIN_CUT_DURATION
+    min_cuts = 3
+    max_cuts = 8
     extra_rules = ""
     if mode == "conservative":
+        min_duration = CONSERVATIVE_MIN_CUT_DURATION
+        min_cuts = 1
+        max_cuts = CONSERVATIVE_MAX_TOTAL_CUTS
         extra_rules = """
 MODO CONSERVADOR: 1-3 cortes com narrativa COMPLETA.
 Priorize COERÊNCIA e VALOR sobre viralidade.
@@ -104,8 +112,8 @@ FORMATO DE SAÍDA (JSON obrigatório):
 CRITÉRIOS:
 - HOOK (0-3s): pattern_interrupt, curiosity_gap, result_first, controversial, fomo
 - SCORE: viral_score = (hook × 0.4) + (retention × 0.3) + (shareability × 0.3)
-- DURAÇÃO: {MIN_CUT_DURATION}-{MAX_CUT_DURATION} segundos por corte
-- MÍNIMO: 3 cortes, MÁXIMO: 8 cortes
+- DURAÇÃO: {min_duration}-{MAX_CUT_DURATION} segundos por corte
+- MÍNIMO: {min_cuts} cortes, MÁXIMO: {max_cuts} cortes
 - QUALITY FLOOR: viral_score >= {QUALITY_FLOOR}. NÃO inclua cortes com score abaixo de {QUALITY_FLOOR}.
 
 REGRAS DE CORTE:
@@ -140,9 +148,13 @@ O QUE NÃO FAZER:
 def build_chunk_prompt(chunk, video_duration, mode):
     """Constrói o prompt de análise para um chunk."""
     transcription_json = json.dumps(chunk["transcription"], ensure_ascii=False)
-    
+
+    min_duration = MIN_CUT_DURATION
+    max_cuts = 3
     extra_rules = ""
     if mode == "conservative":
+        min_duration = CONSERVATIVE_MIN_CUT_DURATION
+        max_cuts = 1
         extra_rules = """
 MODO CONSERVADOR: 1-3 cortes com narrativa COMPLETA.
 Priorize COERÊNCIA e VALOR sobre viralidade.
@@ -164,8 +176,8 @@ FORMATO DE SAÍDA (JSON obrigatório):
 CRITÉRIOS:
 - HOOK (0-3s): pattern_interrupt, curiosity_gap, result_first, controversial, fomo
 - SCORE: viral_score = (hook × 0.4) + (retention × 0.3) + (shareability × 0.3)
-- DURAÇÃO: {MIN_CUT_DURATION}-{MAX_CUT_DURATION} segundos por corte
-- MÍNIMO: 1 corte, MÁXIMO: 3 cortes por chunk
+- DURAÇÃO: {min_duration}-{MAX_CUT_DURATION} segundos por corte
+- MÍNIMO: 1 corte, MÁXIMO: {max_cuts} corte(s) por chunk
 - QUALITY FLOOR: viral_score >= {QUALITY_FLOOR}. NÃO inclua cortes com score abaixo de {QUALITY_FLOOR}.
 
 REGRAS DE CORTE:
@@ -307,6 +319,23 @@ def merge_cuts(all_cuts, video_duration):
         cut["id"] = i + 1
     
     return merged
+
+
+def enforce_mode_limit(cuts, mode):
+    """Aplica limites finais por modo após o merge."""
+    if mode != "conservative" or len(cuts) <= CONSERVATIVE_MAX_TOTAL_CUTS:
+        return cuts, 0
+
+    limited = sorted(
+        cuts,
+        key=lambda c: (-c.get("viral_score", 0), c["start_sec"], c["end_sec"])
+    )[:CONSERVATIVE_MAX_TOTAL_CUTS]
+    limited.sort(key=lambda c: c["start_sec"])
+
+    for i, cut in enumerate(limited):
+        cut["id"] = i + 1
+
+    return limited, len(cuts) - len(limited)
 
 
 def discover_models(api_key):
@@ -484,6 +513,12 @@ def main():
     
     print(f"  Total de cortes brutos: {len(all_cuts)}")
     
+    mode_min_duration = (
+        CONSERVATIVE_MIN_CUT_DURATION
+        if mode == "conservative"
+        else MIN_CUT_DURATION
+    )
+
     # Aplicar quality floor
     before_floor = len(all_cuts)
     all_cuts = [c for c in all_cuts if c.get("viral_score", 0) >= QUALITY_FLOOR]
@@ -493,14 +528,29 @@ def main():
     
     # Validar duração
     before_dur = len(all_cuts)
-    all_cuts = [c for c in all_cuts if MIN_CUT_DURATION <= (c["end_sec"] - c["start_sec"]) <= MAX_CUT_DURATION]
+    all_cuts = [
+        c for c in all_cuts
+        if mode_min_duration <= (c["end_sec"] - c["start_sec"]) <= MAX_CUT_DURATION
+    ]
     filtered_dur = before_dur - len(all_cuts)
     if filtered_dur > 0:
-        print(f"  Duração: {filtered_dur} cortes removidos (fora de {MIN_CUT_DURATION}-{MAX_CUT_DURATION}s)")
+        print(f"  Duração: {filtered_dur} cortes removidos (fora de {mode_min_duration}-{MAX_CUT_DURATION}s)")
     
     # Merge e deduplicação
     merged_cuts = merge_cuts(all_cuts, video_duration)
     print(f"  Após merge: {len(merged_cuts)} cortes únicos")
+    cuts_after_merge = len(merged_cuts)
+
+    mode_trimmed = 0
+    if mode == "conservative":
+        merged_cuts, mode_trimmed = enforce_mode_limit(merged_cuts, mode)
+        if mode_trimmed > 0:
+            warning = (
+                f"Modo conservative limitado a {CONSERVATIVE_MAX_TOTAL_CUTS} cortes finais; "
+                f"{mode_trimmed} corte(s) adicional(is) foram removido(s)."
+            )
+            all_warnings.append(warning)
+            print(f"  Conservative mode: {mode_trimmed} cortes removidos para respeitar o limite final")
     
     # Montar resultado final
     final_result = {
@@ -511,9 +561,11 @@ def main():
         "chunking_info": {
             **chunks_info,
             "quality_floor": QUALITY_FLOOR,
-            "raw_cuts": len(all_cuts) + filtered,
-            "after_quality_floor": len(all_cuts),
-            "after_merge": len(merged_cuts)
+            "raw_cuts": before_floor,
+            "after_quality_floor": before_dur,
+            "after_duration_filter": len(all_cuts),
+            "after_merge": cuts_after_merge,
+            "after_mode_limit": len(merged_cuts)
         }
     }
     

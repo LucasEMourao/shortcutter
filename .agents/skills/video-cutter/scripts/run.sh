@@ -135,14 +135,14 @@ transcribe_audio() {
 from faster_whisper import WhisperModel
 import json, sys
 
-video_path = "$VIDEO_PATH"
+audio_path = "$AUDIO_FILE"
 output_path = '$TEMP_DIR/transcription.json'
 
 print("  Carregando modelo Whisper (small)...")
 model = WhisperModel("small", device="cpu", compute_type="int8")
 
-print(f"  Transcrevendo: {video_path}")
-segments, info = model.transcribe(video_path, language="pt", beam_size=5)
+print(f"  Transcrevendo áudio extraído: {audio_path}")
+segments, info = model.transcribe(audio_path, language="pt", beam_size=5)
 
 transcription = []
 for i, seg in enumerate(segments):
@@ -322,8 +322,14 @@ with open('$TEMP_DIR/valid_cuts.json') as f:
 
 video_duration = float('$VIDEO_DURATION')
 max_gap = float('$PADDING_MAX')
+min_duration = float('$MIN_DURATION')
+max_duration = float('$MAX_DURATION')
 fixed_buffer = 2.0  # Buffer fixo quando gap é muito grande
-buffer_details = []
+
+
+def clamp_end(start_sec, desired_end_sec):
+    max_end_sec = min(video_duration, start_sec + max_duration)
+    return round(min(desired_end_sec, max_end_sec), 1)
 
 for cut in cuts:
     # Encontrar próximo segmento após o fim do corte
@@ -338,7 +344,7 @@ for cut in cuts:
     if next_seg:
         gap = next_seg['start_sec'] - cut['end_sec']
         if gap <= max_gap:
-            cut['end_sec'] = round(next_seg['start_sec'], 1)
+            desired_end = next_seg['start_sec']
             detail = {
                 'id': cut['id'],
                 'original_end': original_end,
@@ -348,7 +354,7 @@ for cut in cuts:
                 'reason': 'Estendido até próximo segmento (gap <= 2s)'
             }
         else:
-            cut['end_sec'] = round(min(video_duration, cut['end_sec'] + fixed_buffer), 1)
+            desired_end = min(video_duration, cut['end_sec'] + fixed_buffer)
             detail = {
                 'id': cut['id'],
                 'original_end': original_end,
@@ -358,7 +364,7 @@ for cut in cuts:
                 'reason': f'Buffer fixo {fixed_buffer}s (gap {gap:.1f}s > {max_gap}s)'
             }
     else:
-        cut['end_sec'] = video_duration
+        desired_end = video_duration
         detail = {
             'id': cut['id'],
             'original_end': original_end,
@@ -367,9 +373,13 @@ for cut in cuts:
             'buffer_applied': video_duration - original_end,
             'reason': 'Último corte - estendido até fim do vídeo'
         }
-    
+
+    cut['end_sec'] = clamp_end(cut['start_sec'], desired_end)
     cut['duration'] = round(cut['end_sec'] - cut['start_sec'], 1)
-    buffer_details.append(detail)
+    if cut['end_sec'] < round(desired_end, 1):
+        detail['clamped_to_max_duration'] = True
+        detail['clamped_end_sec'] = cut['end_sec']
+    cut['_buffer_detail'] = detail
     print(f'  Cut {cut["id"]}: {original_end:.1f}s → {cut["end_sec"]:.1f}s ({detail["reason"]})')
 
 # Ordenar por timestamp antes de verificar sobreposições
@@ -380,18 +390,43 @@ for i in range(len(cuts) - 1):
     if cuts[i]['end_sec'] > cuts[i+1]['start_sec']:
         cuts[i]['end_sec'] = cuts[i+1]['start_sec']
         cuts[i]['duration'] = round(cuts[i]['end_sec'] - cuts[i]['start_sec'], 1)
+        cuts[i]['_buffer_detail']['overlap_adjusted'] = True
+        cuts[i]['_buffer_detail']['overlap_adjusted_end_sec'] = cuts[i]['end_sec']
         print(f'  ⚠️  Cut {cuts[i]["id"]}: sobreposição corrigida → {cuts[i]["end_sec"]:.1f}s')
 
-# Remover cortes que ficaram abaixo de 15s após correções
-before_filter = len(cuts)
-cuts = [c for c in cuts if c['duration'] >= 15]
-removed = before_filter - len(cuts)
-if removed > 0:
-    print(f'  🗑️  {removed} corte(s) removido(s) por duração < 15s após correções')
+# Revalidar contratos finais após buffer e correções
+validated_cuts = []
+for cut in cuts:
+    cut['duration'] = round(cut['end_sec'] - cut['start_sec'], 1)
+    problems = []
+
+    if cut['start_sec'] < 0:
+        problems.append('start_sec < 0')
+    if cut['end_sec'] > video_duration:
+        problems.append('end_sec > duração do vídeo')
+    if cut['end_sec'] <= cut['start_sec']:
+        problems.append('end_sec <= start_sec')
+    if cut['duration'] < min_duration:
+        problems.append(f'duração < {int(min_duration)}s')
+    if cut['duration'] > max_duration:
+        problems.append(f'duração > {int(max_duration)}s')
+
+    if problems:
+        print(f'  🗑️  Cut {cut["id"]}: removido após revalidação final ({", ".join(problems)})')
+        continue
+
+    validated_cuts.append(cut)
+
+cuts = validated_cuts
 
 # Renumerar IDs
-for i, cut in enumerate(cuts):
-    cut['id'] = i + 1
+buffer_details = []
+for i, cut in enumerate(cuts, start=1):
+    detail = cut.pop('_buffer_detail')
+    detail['id'] = i
+    detail['final_duration'] = cut['duration']
+    buffer_details.append(detail)
+    cut['id'] = i
 
 result = {
     'cuts': cuts,
@@ -415,20 +450,38 @@ generate_clips() {
   mkdir -p "$RUN_DIR"
   
   python3 << PYEOF
-import json, subprocess, os
+import json, subprocess, os, sys
 
 with open('$TEMP_DIR/final_cuts.json') as f:
     data = json.load(f)
 
 cuts = data['cuts']
+buffer_details_by_id = {detail['id']: detail for detail in data.get('buffer_details', [])}
 video = "$1"
 run_dir = "$RUN_DIR"
 helper = "$SKILL_DIR/scripts/helper.sh"
+project_dir = "$PROJECT_DIR"
 
-for i, cut in enumerate(cuts):
+
+def to_display_path(path):
+    rel_path = os.path.relpath(path, project_dir)
+    if not rel_path.startswith('..'):
+        rel_path = rel_path.replace(os.sep, '/')
+        return f"./{rel_path}" if rel_path != "." else "."
+    return os.path.abspath(path).replace(os.sep, '/')
+
+
+run_dir_display = to_display_path(run_dir)
+successful_cuts = []
+successful_buffer_details = []
+clip_failures = []
+
+for cut in cuts:
+    source_id = cut['id']
+    next_id = len(successful_cuts) + 1
     start = str(cut['start_sec'])
     end = str(cut['end_sec'])
-    nn = f"{i+1:02d}"
+    nn = f"{next_id:02d}"
     start_int = int(cut['start_sec'])
     end_int = int(cut['end_sec'])
     filename = f"cut_{nn}_{start_int}-{end_int}s.mp4"
@@ -438,11 +491,32 @@ for i, cut in enumerate(cuts):
     result = subprocess.run(cmd, capture_output=True, text=True)
     
     if result.returncode == 0:
+        cut = dict(cut)
+        cut['id'] = next_id
         cut['filename'] = filename
-        cut['path'] = f"./output/{os.path.basename(run_dir)}/{filename}"
+        cut['path'] = f"{run_dir_display}/{filename}"
+        successful_cuts.append(cut)
+        if source_id in buffer_details_by_id:
+            detail = dict(buffer_details_by_id[source_id])
+            detail['id'] = next_id
+            successful_buffer_details.append(detail)
         print(f'  ✓ {filename} ({cut["duration"]:.1f}s)')
     else:
-        print(f'  ✗ {filename}: {result.stderr}')
+        error_text = (result.stderr or result.stdout or 'erro desconhecido').strip()
+        clip_failures.append({
+            'source_id': source_id,
+            'filename': filename,
+            'error': error_text
+        })
+        print(f'  ✗ {filename}: {error_text}')
+
+if not successful_cuts:
+    print('Nenhum clip pôde ser gerado.')
+    sys.exit(1)
+
+data['cuts'] = successful_cuts
+data['buffer_details'] = successful_buffer_details
+data['clip_failures'] = clip_failures
 
 with open('$TEMP_DIR/final_cuts_with_files.json', 'w') as f:
     json.dump(data, f, indent=2, ensure_ascii=False)
@@ -458,6 +532,7 @@ generate_metadata() {
   
   python3 << PYEOF
 import json
+import os
 from datetime import datetime
 
 with open('$TEMP_DIR/final_cuts_with_files.json') as f:
@@ -470,11 +545,27 @@ with open('$TEMP_DIR/transcription_sanitized.json') as f:
     transcription = json.load(f)
 
 mode = "$MODE"
-run_dir_name = "$(basename "$RUN_DIR")"
+run_dir = "$RUN_DIR"
+project_dir = "$PROJECT_DIR"
+
+
+def to_display_path(path):
+    rel_path = os.path.relpath(path, project_dir)
+    if not rel_path.startswith('..'):
+        rel_path = rel_path.replace(os.sep, '/')
+        return f"./{rel_path}" if rel_path != "." else "."
+    return os.path.abspath(path).replace(os.sep, '/')
+
+
+quality_warnings = list(analysis.get('quality_warnings', []))
+for failure in data.get('clip_failures', []):
+    quality_warnings.append(
+        f"Falha ao gerar {failure['filename']}: {failure['error']}"
+    )
 
 output = {
     'input_video': "$VIDEO_NAME",
-    'output_dir': f"./output/{run_dir_name}",
+    'output_dir': to_display_path(run_dir),
     'generated_at': datetime.now().isoformat() + 'Z',
     'model': analysis.get('model_used', 'unknown'),
     'mode': mode,
@@ -488,7 +579,7 @@ output = {
     'buffer_details': data['buffer_details'],
     'cuts': data['cuts'],
     'total_cuts': len(data['cuts']),
-    'quality_warnings': analysis.get('quality_warnings', [])
+    'quality_warnings': quality_warnings
 }
 
 output_path = "$RUN_DIR/cuts.json"
@@ -559,7 +650,7 @@ main() {
   
   # Configurar variáveis globais
   VIDEO_PATH="$(realpath "$video")"
-  OUTPUT_DIR="$(realpath "$output_dir")"
+  OUTPUT_DIR="$(realpath -m "$output_dir")"
   MODE="$mode"
   RUN_DIR="$OUTPUT_DIR/$(date +%Y%m%d_%H%M)"
   TEMP_DIR="/tmp/shortcutter_$$"

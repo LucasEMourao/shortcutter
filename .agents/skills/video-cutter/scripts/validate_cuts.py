@@ -169,8 +169,13 @@ def validate_cuts(output_dir):
         if filename:
             m = re.match(r'cut_(\d+)_(\d+)-(\d+)s\.mp4', filename)
             if m:
+                fn_id = int(m.group(1))
                 fn_start = int(m.group(2))
                 fn_end = int(m.group(3))
+                if fn_id != cid:
+                    errors.append(
+                        f"Cut {cid}: filename usa índice {fn_id:02d}, esperado {cid:02d}"
+                    )
                 if abs(fn_start - start) > 1 or abs(fn_end - end) > 1:
                     warnings.append(
                         f"Cut {cid}: filename ({fn_start}-{fn_end}) "
